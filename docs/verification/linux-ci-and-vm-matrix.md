@@ -1,0 +1,41 @@
+# Linux CI and VM matrix
+
+## CI checks
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+- formatting, unit tests, Clippy with warnings denied, and the information-flow
+  reference cases;
+- Linux compilation of the shared BPF object and the Aya/libbpf-rs userspace
+  loaders; and
+- an `aarch64-unknown-linux-gnu` Rust cross-build.
+
+The CI compilation jobs do not claim BPF runtime coverage. A container or QEMU
+userland architecture is not a substitute for the matching kernel architecture.
+
+## Real arm64 runtime evidence
+
+Run on a Linux arm64 Docker host, including Docker Desktop’s arm64 Linux VM:
+
+```sh
+bash scripts/verify-linux-arm64-runtime.sh
+```
+
+This executes two independent privileged integration checks:
+
+1. `tests/vm/toolchain-spike/run-arm64-container-probe.sh` compiles the shared
+   ring-buffer object, then loads and attaches it through Aya and libbpf-rs.
+2. `tests/vm/kernel-capabilities/probe-arm64-container.sh` verifies seccomp
+   self-denial, BPF-LSM file denial, and cgroup `connect4` denial.
+
+The recorded local evidence is Linux `6.12.54-linuxkit` on arm64 with BTF,
+cgroup v2, and `capability,bpf` active. Both integration commands passed on
+2026-09-11.
+
+## Real x86_64 runtime requirement
+
+Before the toolchain or kernel matrix decisions are closed, run the same
+privileged integration commands on a real x86_64 Linux VM with BTF and BPF LSM
+enabled. Record its kernel release, active LSM list, BTF source, and output in
+this document. Do not count Docker `--platform linux/amd64` on an arm64 host as
+x86_64 kernel validation; it is userspace emulation over an arm64 kernel.

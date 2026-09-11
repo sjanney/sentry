@@ -1,0 +1,44 @@
+[
+  {
+    "name": "secret read always blocks egress",
+    "taint": ["secret"],
+    "destination": {"ip": "203.0.113.10", "domain": "api.example.test", "dns_observed": true, "ttl_valid": true, "same_domain": true},
+    "policy": {"allowed_domains": ["api.example.test"], "deny_untrusted_egress": false},
+    "expected": "deny_secret_taint"
+  },
+  {
+    "name": "allowed resolved domain without taint is permitted",
+    "taint": [],
+    "destination": {"ip": "203.0.113.10", "domain": "api.example.test", "dns_observed": true, "ttl_valid": true, "same_domain": true},
+    "policy": {"allowed_domains": ["api.example.test"], "deny_untrusted_egress": false},
+    "expected": "allow"
+  },
+  {
+    "name": "direct IP cannot satisfy a domain rule",
+    "taint": [],
+    "destination": {"ip": "203.0.113.10", "domain": null, "dns_observed": false, "ttl_valid": false, "same_domain": false},
+    "policy": {"allowed_domains": ["api.example.test"], "deny_untrusted_egress": false},
+    "expected": "deny_unattributed_destination"
+  },
+  {
+    "name": "expired resolution cannot satisfy a domain rule",
+    "taint": [],
+    "destination": {"ip": "203.0.113.10", "domain": "api.example.test", "dns_observed": true, "ttl_valid": false, "same_domain": true},
+    "policy": {"allowed_domains": ["api.example.test"], "deny_untrusted_egress": false},
+    "expected": "deny_unattributed_destination"
+  },
+  {
+    "name": "untrusted input policy can block egress",
+    "taint": ["untrusted_input"],
+    "destination": {"ip": "203.0.113.10", "domain": "api.example.test", "dns_observed": true, "ttl_valid": true, "same_domain": true},
+    "policy": {"allowed_domains": ["api.example.test"], "deny_untrusted_egress": true},
+    "expected": "deny_untrusted_taint"
+  },
+  {
+    "name": "untrusted input can be audit-only",
+    "taint": ["untrusted_input"],
+    "destination": {"ip": "203.0.113.10", "domain": "api.example.test", "dns_observed": true, "ttl_valid": true, "same_domain": true},
+    "policy": {"allowed_domains": ["api.example.test"], "deny_untrusted_egress": false},
+    "expected": "allow"
+  }
+]

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: bash scripts/verify.sh
+
+  linux-kernel-userspace-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/vm/toolchain-spike/compile-container.sh
+
+  arm64-cross-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: aarch64-unknown-linux-gnu
+      - run: sudo apt-get update && sudo apt-get install --yes gcc-aarch64-linux-gnu
+      - run: >-
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          cargo build --workspace --target aarch64-unknown-linux-gnu

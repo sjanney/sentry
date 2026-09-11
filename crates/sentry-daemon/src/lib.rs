@@ -1,0 +1,469 @@
+// SPDX-License-Identifier: Apache-2.0
+use std::{
+    collections::{HashMap, VecDeque},
+    fs,
+    os::unix::fs::MetadataExt,
+    path::Path,
+};
+
+use sentry_types::EventHeader;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NormalizedEvent {
+    header: EventHeader,
+    target: RedactedTarget,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RedactedTarget {
+    Public(String),
+    Redacted { class: &'static str },
+}
+
+impl RedactedTarget {
+    #[must_use]
+    pub fn from_observation(value: &str, sensitive_class: Option<&'static str>) -> Self {
+        match sensitive_class {
+            Some(class) => Self::Redacted { class },
+            None => Self::Public(value.to_owned()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IngestOutcome {
+    Accepted { sequence: u64 },
+    Dropped { total_dropped: u64 },
+    Malformed,
+}
+
+pub struct EventIngestor {
+    capacity: usize,
+    next_sequence: u64,
+    dropped: u64,
+    events: VecDeque<NormalizedEvent>,
+}
+
+impl EventIngestor {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            next_sequence: 1,
+            dropped: 0,
+            events: VecDeque::with_capacity(capacity),
+        }
+    }
+
+    pub fn ingest(&mut self, bytes: &[u8], target: RedactedTarget) -> IngestOutcome {
+        let Ok(mut header) = EventHeader::decode(bytes) else {
+            return IngestOutcome::Malformed;
+        };
+        if self.events.len() == self.capacity {
+            self.dropped += 1;
+            return IngestOutcome::Dropped {
+                total_dropped: self.dropped,
+            };
+        }
+        header.sequence = self.next_sequence;
+        self.next_sequence += 1;
+        self.events.push_back(NormalizedEvent { header, target });
+        IngestOutcome::Accepted {
+            sequence: header.sequence,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ProcessKey {
+    pub tgid: u32,
+    pub start_time_ns: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Coverage {
+    Launch,
+    AttachPartial,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProcessRecord {
+    run_id: u64,
+    parent: Option<ProcessKey>,
+    coverage: Coverage,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrackerError {
+    Capacity,
+    DuplicateProcess,
+    UnknownChild,
+    UnknownParent,
+}
+
+pub struct ProcessTracker {
+    capacity: usize,
+    processes: HashMap<ProcessKey, ProcessRecord>,
+}
+
+impl ProcessTracker {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            processes: HashMap::with_capacity(capacity),
+        }
+    }
+
+    /// # Errors
+    ///
+    /// Returns `DuplicateProcess` or `Capacity` when the identity cannot be tracked.
+    pub fn register_launch(&mut self, key: ProcessKey, run_id: u64) -> Result<(), TrackerError> {
+        self.insert(
+            key,
+            ProcessRecord {
+                run_id,
+                parent: None,
+                coverage: Coverage::Launch,
+            },
+        )
+    }
+
+    /// # Errors
+    ///
+    /// Returns `DuplicateProcess` or `Capacity` when the identity cannot be tracked.
+    pub fn register_attach(&mut self, key: ProcessKey, run_id: u64) -> Result<(), TrackerError> {
+        self.insert(
+            key,
+            ProcessRecord {
+                run_id,
+                parent: None,
+                coverage: Coverage::AttachPartial,
+            },
+        )
+    }
+
+    /// # Errors
+    ///
+    /// Returns `UnknownParent`, `DuplicateProcess`, or `Capacity` when attribution fails.
+    pub fn fork(&mut self, parent: ProcessKey, child: ProcessKey) -> Result<(), TrackerError> {
+        let parent_record = self
+            .processes
+            .get(&parent)
+            .copied()
+            .ok_or(TrackerError::UnknownParent)?;
+        self.insert(
+            child,
+            ProcessRecord {
+                run_id: parent_record.run_id,
+                parent: Some(parent),
+                coverage: parent_record.coverage,
+            },
+        )
+    }
+
+    /// # Errors
+    ///
+    /// Returns `UnknownChild` or `UnknownParent` when either live identity is absent.
+    pub fn reparent(
+        &mut self,
+        child: ProcessKey,
+        new_parent: ProcessKey,
+    ) -> Result<(), TrackerError> {
+        if !self.processes.contains_key(&new_parent) {
+            return Err(TrackerError::UnknownParent);
+        }
+        let child_record = self
+            .processes
+            .get_mut(&child)
+            .ok_or(TrackerError::UnknownChild)?;
+        child_record.parent = Some(new_parent);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn exit(&mut self, key: ProcessKey) -> bool {
+        self.processes.remove(&key).is_some()
+    }
+
+    #[must_use]
+    pub fn coverage(&self, key: ProcessKey) -> Option<Coverage> {
+        self.processes.get(&key).map(|record| record.coverage)
+    }
+
+    #[must_use]
+    pub fn can_claim_full_coverage(&self, key: ProcessKey) -> bool {
+        self.coverage(key) == Some(Coverage::Launch)
+    }
+
+    fn insert(&mut self, key: ProcessKey, record: ProcessRecord) -> Result<(), TrackerError> {
+        if self.processes.contains_key(&key) {
+            return Err(TrackerError::DuplicateProcess);
+        }
+        if self.processes.len() == self.capacity {
+            return Err(TrackerError::Capacity);
+        }
+        self.processes.insert(key, record);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum CredentialClass {
+    SshKey,
+    CloudCredential,
+    DotEnv,
+    Keyring,
+    TokenCache,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct FileIdentity {
+    pub device: u64,
+    pub inode: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileAccessOutcome {
+    Attempted,
+    Succeeded,
+    Denied { errno: i32 },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObservedTarget {
+    Public(String),
+    Credential(CredentialClass),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileAccessObservation {
+    pub target: ObservedTarget,
+    pub identity: Option<FileIdentity>,
+    pub outcome: FileAccessOutcome,
+}
+
+pub struct CredentialCatalog {
+    known: HashMap<FileIdentity, CredentialClass>,
+}
+
+impl CredentialCatalog {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            known: HashMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn observe(&mut self, path: &Path, outcome: FileAccessOutcome) -> FileAccessObservation {
+        let resolved = fs::canonicalize(path).ok();
+        let identity = resolved
+            .as_deref()
+            .and_then(|resolved_path| fs::metadata(resolved_path).ok())
+            .map(|metadata| FileIdentity {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            });
+        let classified = classify_path(path)
+            .or_else(|| resolved.as_deref().and_then(classify_path))
+            .or_else(|| identity.and_then(|identity| self.known.get(&identity).copied()));
+        if let (Some(identity), Some(class)) = (identity, classified) {
+            self.known.insert(identity, class);
+        }
+        let target = match classified {
+            Some(class) => ObservedTarget::Credential(class),
+            None => ObservedTarget::Public(path.display().to_string()),
+        };
+        FileAccessObservation {
+            target,
+            identity,
+            outcome,
+        }
+    }
+}
+
+impl Default for CredentialCatalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn classify_path(path: &Path) -> Option<CredentialClass> {
+    let text = path.to_string_lossy();
+    let file_name = path.file_name()?.to_string_lossy();
+    if text.contains("/.ssh/") && file_name.starts_with("id_") {
+        Some(CredentialClass::SshKey)
+    } else if text.ends_with("/.aws/credentials")
+        || text.contains("/gcloud/")
+        || text.contains("/.azure/")
+    {
+        Some(CredentialClass::CloudCredential)
+    } else if file_name == ".env" || file_name.starts_with(".env.") {
+        Some(CredentialClass::DotEnv)
+    } else if text.contains("keyring") {
+        Some(CredentialClass::Keyring)
+    } else if file_name.contains("token") || text.contains("token-cache") {
+        Some(CredentialClass::TokenCache)
+    } else {
+        None
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sentry_types::{EVENT_HEADER_SIZE, EVENT_HEADER_SIZE_U32, EventKind, ProcessIdentity};
+
+    fn encoded_exec() -> [u8; EVENT_HEADER_SIZE] {
+        EventHeader::new(
+            EventKind::Exec,
+            EVENT_HEADER_SIZE_U32,
+            0,
+            1,
+            ProcessIdentity {
+                run_id: 2,
+                tgid: 3,
+                tid: 4,
+                parent_tgid: 0,
+            },
+        )
+        .encode()
+    }
+
+    #[test]
+    fn ingestion_assigns_sequences_and_never_evicts_evidence() {
+        let mut ingestor = EventIngestor::new(1);
+        assert_eq!(
+            ingestor.ingest(
+                &encoded_exec(),
+                RedactedTarget::Public("src/main.rs".to_owned())
+            ),
+            IngestOutcome::Accepted { sequence: 1 }
+        );
+        assert_eq!(
+            ingestor.ingest(
+                &encoded_exec(),
+                RedactedTarget::Public("src/lib.rs".to_owned())
+            ),
+            IngestOutcome::Dropped { total_dropped: 1 }
+        );
+        assert_eq!(ingestor.events.len(), 1);
+    }
+
+    #[test]
+    fn malformed_and_secret_targets_are_explicit() {
+        let mut ingestor = EventIngestor::new(1);
+        assert_eq!(
+            ingestor.ingest(&[], RedactedTarget::Public("ignored".to_owned())),
+            IngestOutcome::Malformed
+        );
+        assert_eq!(
+            RedactedTarget::from_observation("/home/user/.aws/credentials", Some("credential")),
+            RedactedTarget::Redacted {
+                class: "credential"
+            }
+        );
+    }
+
+    fn key(tgid: u32, start_time_ns: u64) -> ProcessKey {
+        ProcessKey {
+            tgid,
+            start_time_ns,
+        }
+    }
+
+    #[test]
+    fn launch_tree_inherits_coverage_and_cleans_up_short_lived_children() {
+        let root = key(10, 100);
+        let child = key(11, 101);
+        let mut tracker = ProcessTracker::new(2);
+        tracker.register_launch(root, 7).unwrap();
+        tracker.fork(root, child).unwrap();
+        assert!(tracker.can_claim_full_coverage(child));
+        assert!(tracker.exit(child));
+        assert!(!tracker.exit(child));
+        assert_eq!(tracker.coverage(child), None);
+    }
+
+    #[test]
+    fn pid_reuse_is_not_the_same_process() {
+        let old = key(42, 100);
+        let replacement = key(42, 200);
+        let mut tracker = ProcessTracker::new(2);
+        tracker.register_launch(old, 1).unwrap();
+        assert!(tracker.exit(old));
+        tracker.register_attach(replacement, 2).unwrap();
+        assert_eq!(tracker.coverage(old), None);
+        assert_eq!(tracker.coverage(replacement), Some(Coverage::AttachPartial));
+    }
+
+    #[test]
+    fn reparenting_preserves_run_and_attach_coverage_limit() {
+        let attached = key(10, 100);
+        let child = key(11, 101);
+        let adopted_parent = key(1, 1);
+        let mut tracker = ProcessTracker::new(3);
+        tracker.register_attach(attached, 7).unwrap();
+        tracker.register_launch(adopted_parent, 8).unwrap();
+        tracker.fork(attached, child).unwrap();
+        tracker.reparent(child, adopted_parent).unwrap();
+        assert!(!tracker.can_claim_full_coverage(child));
+    }
+
+    #[test]
+    fn capacity_and_unknown_parent_are_explicit_failures() {
+        let root = key(10, 100);
+        let child = key(11, 101);
+        let mut tracker = ProcessTracker::new(1);
+        assert_eq!(tracker.fork(root, child), Err(TrackerError::UnknownParent));
+        tracker.register_launch(root, 1).unwrap();
+        assert_eq!(tracker.fork(root, child), Err(TrackerError::Capacity));
+    }
+
+    #[test]
+    fn credential_catalog_redacts_paths_and_keeps_identity_across_aliases() {
+        use std::{fs, os::unix::fs::symlink};
+
+        let root = std::env::temp_dir().join(format!("sentry-files-{}", std::process::id()));
+        let ssh = root.join(".ssh/id_ed25519");
+        let hardlink = root.join("renamed-key");
+        let symlink_path = root.join("alias");
+        fs::create_dir_all(ssh.parent().unwrap()).unwrap();
+        fs::write(&ssh, "fixture-only").unwrap();
+        fs::hard_link(&ssh, &hardlink).unwrap();
+        symlink(&ssh, &symlink_path).unwrap();
+
+        let mut catalog = CredentialCatalog::new();
+        let first = catalog.observe(&ssh, FileAccessOutcome::Succeeded);
+        let via_hardlink = catalog.observe(&hardlink, FileAccessOutcome::Succeeded);
+        let via_symlink = catalog.observe(&symlink_path, FileAccessOutcome::Succeeded);
+        assert_eq!(
+            first.target,
+            ObservedTarget::Credential(CredentialClass::SshKey)
+        );
+        assert_eq!(
+            via_hardlink.target,
+            ObservedTarget::Credential(CredentialClass::SshKey)
+        );
+        assert_eq!(
+            via_symlink.target,
+            ObservedTarget::Credential(CredentialClass::SshKey)
+        );
+        assert_eq!(first.identity, via_hardlink.identity);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn denied_credential_attempt_never_exposes_the_path() {
+        let mut catalog = CredentialCatalog::new();
+        let observation = catalog.observe(
+            Path::new("/home/agent/.aws/credentials"),
+            FileAccessOutcome::Denied { errno: 13 },
+        );
+        assert_eq!(
+            observation.target,
+            ObservedTarget::Credential(CredentialClass::CloudCredential)
+        );
+        assert_eq!(observation.outcome, FileAccessOutcome::Denied { errno: 13 });
+    }
+}

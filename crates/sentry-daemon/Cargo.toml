@@ -1,0 +1,17 @@
+[package]
+name = "sentry-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "sentryd"
+path = "src/main.rs"
+
+[dependencies]
+sentry-policy = { path = "../sentry-policy" }
+sentry-types = { path = "../sentry-types" }
