@@ -3,6 +3,7 @@ use std::process;
 
 use sentry_cli::{Capability, CliError, CommandOutcome, attach, capabilities, run_command};
 use sentry_daemon::audit::{self, AuditEvent, AuditLog};
+use sentry_daemon::capability::KernelPreflight;
 use sentry_policy::{
     Destination, ObservationTrust, RunCompleteness, RunObservation, TaintMask,
     compiler::{
@@ -37,6 +38,19 @@ fn main() {
             .map_err(|error| render_error(&error)),
         Some("capabilities") => capabilities(std::env::consts::OS)
             .map(|capabilities| {
+                let preflight = KernelPreflight::inspect(std::path::Path::new("/"));
+                println!(
+                    "btf: {} (preflight)",
+                    if preflight.btf_readable { "present" } else { "missing" }
+                );
+                println!(
+                    "bpf-lsm: {} (preflight; attachment unverified)",
+                    if preflight.bpf_lsm_active { "active" } else { "inactive" }
+                );
+                println!(
+                    "cgroup-v2: {} (preflight; attachment unverified)",
+                    if preflight.cgroup_v2_available { "present" } else { "missing" }
+                );
                 for capability in capabilities {
                     println!("{}", render_capability(capability));
                 }

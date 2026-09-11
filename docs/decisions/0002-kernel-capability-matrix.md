@@ -9,6 +9,11 @@ enforcement tier in every policy result and audit record. A missing capability
 never causes a policy to be silently broadened or a protection claim to remain
 enabled.
 
+The CLI preflight reports whether BTF is readable, `bpf` is active in the LSM
+list, and cgroup v2 exposes its controllers. These are discovery facts only:
+the daemon must still load and attach each selected program before it can claim
+the corresponding enforcement tier.
+
 File-operation denial requires a verified BPF LSM attachment. Network egress
 denial requires a verified cgroup-v2 BPF attachment. For launch-managed
 agents, seccomp-BPF is the mandatory non-LSM fallback for syscall-level
