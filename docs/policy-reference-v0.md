@@ -82,6 +82,16 @@ validation failure leaves the previous policy in place. The current activation
 boundary is userspace state; connecting those bounded slots to eBPF maps is
 still required before an enforce-mode kernel claim can be made.
 
+## Dry-run verdicts
+
+Dry-run calls the same compiled egress decision as enforce mode and records the
+result, `would_deny`, the matched rule ID, policy version, policy hash, and an
+explanation. A dry-run record never blocks the current execution. That means a
+would-denied process can continue, read more inputs, and issue later requests;
+its subsequent behavior can differ from an enforce-mode execution that was
+actually stopped. Review dry-run evidence as a counterfactual, not proof that
+the resulting process trace would be identical under enforcement.
+
 ## Example behavior
 
 The included [policy fixture](../examples/policy-v0.json) permits an observed,

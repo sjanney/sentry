@@ -56,6 +56,23 @@ pub struct CompiledKernelPolicy {
     pub cidr_slots: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuleId {
+    SecretTaintDeny,
+    UntrustedTaintDeny,
+    UnattributedDestinationDeny,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DryRunVerdict {
+    pub decision: EgressDecision,
+    pub would_deny: bool,
+    pub rule_id: Option<RuleId>,
+    pub policy_version: u64,
+    pub policy_hash: u64,
+    pub explanation: &'static str,
+}
+
 /// Validates a policy and creates the complete bounded kernel state off-path.
 ///
 /// The returned value has no side effects. Call `PolicyActivation::activate`
@@ -138,6 +155,37 @@ impl CompiledKernelPolicy {
                 deny_untrusted_egress: true,
             },
         )
+    }
+
+    #[must_use]
+    pub fn dry_run_egress(&self, taint: TaintMask, destination: Destination<'_>) -> DryRunVerdict {
+        let decision = self.decide_egress(taint, destination);
+        let (would_deny, rule_id, explanation) = match decision {
+            EgressDecision::Allow => (false, None, "would allow: no deny rule matched"),
+            EgressDecision::DenySecretTaint => (
+                true,
+                Some(RuleId::SecretTaintDeny),
+                "would deny: protected credential data tainted this execution domain",
+            ),
+            EgressDecision::DenyUntrustedTaint => (
+                true,
+                Some(RuleId::UntrustedTaintDeny),
+                "would deny: untrusted input egress is denied by policy",
+            ),
+            EgressDecision::DenyUnattributedDestination => (
+                true,
+                Some(RuleId::UnattributedDestinationDeny),
+                "would deny: destination lacks matching unexpired DNS evidence",
+            ),
+        };
+        DryRunVerdict {
+            decision,
+            would_deny,
+            rule_id,
+            policy_version: self.policy_version,
+            policy_hash: self.policy_hash,
+            explanation,
+        }
     }
 }
 
@@ -288,5 +336,28 @@ mod tests {
         let compiled = compile_kernel_policy(&spec, &spec.required_capabilities, limits()).unwrap();
         activation.activate(compiled.clone());
         assert_eq!(activation.active(), Some(compiled));
+    }
+
+    #[test]
+    fn dry_run_verdicts_have_enforce_parity_and_explain_would_deny() {
+        let spec = policy();
+        let compiled = compile_kernel_policy(&spec, &spec.required_capabilities, limits()).unwrap();
+        let destination = Destination {
+            domain: Some("api.example.test"),
+            dns_observed: true,
+            ttl_valid: true,
+            same_execution_domain: true,
+        };
+        let taint = TaintMask {
+            secret: true,
+            untrusted_input: false,
+        };
+        let enforce = compiled.decide_egress(taint, destination);
+        let dry_run = compiled.dry_run_egress(taint, destination);
+        assert_eq!(dry_run.decision, enforce);
+        assert!(dry_run.would_deny);
+        assert_eq!(dry_run.rule_id, Some(RuleId::SecretTaintDeny));
+        assert_eq!(dry_run.policy_hash, compiled.policy_hash);
+        assert!(dry_run.explanation.contains("credential"));
     }
 }
