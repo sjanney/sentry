@@ -4,10 +4,11 @@ use std::process;
 use sentry_cli::{Capability, CliError, CommandOutcome, attach, capabilities, run_command};
 use sentry_daemon::audit::{self, AuditEvent, AuditLog};
 use sentry_policy::{
-    Destination, TaintMask,
+    Destination, ObservationTrust, RunCompleteness, RunObservation, TaintMask,
     compiler::{
         KernelCapability, KernelPolicyLimits, PolicyMode, PolicySpec, compile_kernel_policy,
     },
+    merge_profile, render_policy_candidate,
 };
 use std::collections::BTreeSet;
 
@@ -54,12 +55,13 @@ fn main() {
                 CommandOutcome::Exited(0)
             }),
         Some("dry-run") => dry_run(&arguments[1..]),
+        Some("generate") => generate_candidate(&arguments[1..]),
         Some("--version" | "version") => {
             println!("sentry {}", env!("CARGO_PKG_VERSION"));
             Ok(CommandOutcome::Exited(0))
         }
         _ => Err(
-            "usage: sentry <run|observe> -- <command> [args...] | dry-run --allow-domain DOMAIN --domain DOMAIN [--secret] | attach <pid> | capabilities | audit verify <path>"
+            "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run --allow-domain DOMAIN --domain DOMAIN [--secret] | attach <pid> | capabilities | audit verify <path>"
                 .to_owned(),
         ),
     };
@@ -71,6 +73,40 @@ fn main() {
             process::exit(2);
         }
     }
+}
+
+fn generate_candidate(arguments: &[String]) -> Result<CommandOutcome, String> {
+    let mut run_id = None;
+    let mut workspace = None;
+    let mut domain = None;
+    let mut index = 0;
+    while index < arguments.len() {
+        let value = arguments
+            .get(index + 1)
+            .cloned()
+            .ok_or_else(|| "generate options require a value".to_owned())?;
+        match arguments[index].as_str() {
+            "--run-id" => run_id = Some(value),
+            "--workspace" => workspace = Some(value),
+            "--domain" => domain = Some(value),
+            _ => return Err("unknown generate option".to_owned()),
+        }
+        index += 2;
+    }
+    let run_id = run_id.ok_or_else(|| "generate requires --run-id ID".to_owned())?;
+    let workspace = workspace.ok_or_else(|| "generate requires --workspace PATH".to_owned())?;
+    let domain = domain.ok_or_else(|| "generate requires --domain DOMAIN".to_owned())?;
+    let profile = merge_profile([RunObservation {
+        run_id,
+        completeness: RunCompleteness::Complete,
+        trust: ObservationTrust::Trusted,
+        workspace_paths: BTreeSet::from([workspace]),
+        domains: BTreeSet::from([domain]),
+        credential_classes: BTreeSet::new(),
+    }])
+    .map_err(|error| format!("profile generation failed: {error:?}"))?;
+    print!("{}", render_policy_candidate(&profile));
+    Ok(CommandOutcome::Exited(0))
 }
 
 fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {

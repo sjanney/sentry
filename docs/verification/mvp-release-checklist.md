@@ -4,12 +4,12 @@ Status: **not a demo candidate**. This checklist is a release-blocker record.
 
 | Required outcome | Evidence | Status |
 | --- | --- | --- |
-| Observe | Event and filesystem models, adversarial corpus | Partial: not wired to CLI |
+| Observe | CLI command audit records, event and filesystem models, adversarial corpus | Partial: no kernel observation wiring |
 | Profile | Deterministic trusted-run profile tests | Passes in library |
-| Generate | Review-only candidate rendering tests | Passes in library |
-| Dry-run | Compiled-policy verdict parity tests | Passes in library |
+| Generate | CLI review-only candidate from an explicit trusted observation | Partial: not derived from observed kernel events |
+| Dry-run | CLI compiled-policy verdict plus parity tests | Partial: no live kernel-policy map |
 | Enforce | Native arm64 BPF LSM/cgroup/seccomp hook probes | Partial: no live policy map/CLI path |
-| Verify | SHA-256 audit-chain and Python verifier | Partial: no live event emission |
+| Verify | CLI SHA-256 audit verification and Python verifier | Partial: no live kernel event emission |
 
 The host-safe suite, policy fixtures, adversarial corpus, and native arm64 hook
 probe pass. The x86_64 runtime cell is unsupported. The performance artifact

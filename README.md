@@ -22,6 +22,10 @@ COMMAND` adds redacted command start/outcome audit records, which can be checked
 with `sentry audit verify LOG`, on a supported Linux host. `attach PID` is intentionally unavailable until runtime
 process attachment is integrated.
 
+Use `sentry generate --run-id demo-1 --workspace "$PWD" --domain
+api.example.test` to render a review-only candidate from one explicitly supplied
+complete trusted observation. It does not activate policy.
+
 Use `sentry dry-run --allow-domain api.example.test --domain api.example.test
 --secret` to evaluate the compiled policy and print its hash, matched rule, and
 would-deny explanation. It is a local policy-semantic command; it does not
