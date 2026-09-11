@@ -9,8 +9,8 @@ kernel=$(uname -r)
 {
   echo '# Native security matrix result'
   echo
-  echo "- machine: `$machine`"
-  echo "- kernel: `$kernel`"
+  printf '%s\n' "- machine: \`$machine\`"
+  printf '%s\n' "- kernel: \`$kernel\`"
   echo '- primary mode: privileged BPF LSM and cgroup probe'
   echo '- fallback mode: seccomp socket-deny probe'
   echo
