@@ -421,13 +421,14 @@ mod tests {
     }
 
     #[test]
-    fn credential_catalog_redacts_paths_and_keeps_identity_across_aliases() {
+    fn credential_catalog_redacts_paths_and_keeps_identity_across_aliases_and_renames() {
         use std::{fs, os::unix::fs::symlink};
 
         let root = std::env::temp_dir().join(format!("sentry-files-{}", std::process::id()));
         let ssh = root.join(".ssh/id_ed25519");
-        let hardlink = root.join("renamed-key");
+        let hardlink = root.join("hard-linked-key");
         let symlink_path = root.join("alias");
+        let renamed = root.join("renamed-key");
         fs::create_dir_all(ssh.parent().unwrap()).unwrap();
         fs::write(&ssh, "fixture-only").unwrap();
         fs::hard_link(&ssh, &hardlink).unwrap();
@@ -437,6 +438,8 @@ mod tests {
         let first = catalog.observe(&ssh, FileAccessOutcome::Succeeded);
         let via_hardlink = catalog.observe(&hardlink, FileAccessOutcome::Succeeded);
         let via_symlink = catalog.observe(&symlink_path, FileAccessOutcome::Succeeded);
+        fs::rename(&ssh, &renamed).unwrap();
+        let via_rename = catalog.observe(&renamed, FileAccessOutcome::Succeeded);
         assert_eq!(
             first.target,
             ObservedTarget::Credential(CredentialClass::SshKey)
@@ -450,6 +453,41 @@ mod tests {
             ObservedTarget::Credential(CredentialClass::SshKey)
         );
         assert_eq!(first.identity, via_hardlink.identity);
+        assert_eq!(first.identity, via_rename.identity);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn credential_catalog_recognizes_each_fixture_class_without_storing_content() {
+        use std::fs;
+
+        let root =
+            std::env::temp_dir().join(format!("sentry-credential-fixtures-{}", std::process::id()));
+        let fixtures = [
+            (
+                root.join(".aws/credentials"),
+                CredentialClass::CloudCredential,
+            ),
+            (root.join(".env.production"), CredentialClass::DotEnv),
+            (
+                root.join("keyrings/login.keyring"),
+                CredentialClass::Keyring,
+            ),
+            (
+                root.join(".cache/token-cache/tokens.json"),
+                CredentialClass::TokenCache,
+            ),
+        ];
+        let mut catalog = CredentialCatalog::new();
+
+        for (path, class) in fixtures {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "fixture-only").unwrap();
+            let observation = catalog.observe(&path, FileAccessOutcome::Attempted);
+            assert_eq!(observation.target, ObservedTarget::Credential(class));
+            assert_eq!(observation.outcome, FileAccessOutcome::Attempted);
+            assert!(observation.identity.is_some());
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
