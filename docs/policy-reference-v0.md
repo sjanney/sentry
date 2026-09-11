@@ -1,0 +1,59 @@
+# Sentry policy v0 reference
+
+Policy v0 is JSON. Every document has `schema_version: 1`; unknown schema
+versions are rejected with `POLICY_UNSUPPORTED_SCHEMA`. Unknown fields are
+rejected with `POLICY_UNKNOWN_FIELD`, missing required fields with
+`POLICY_MISSING_FIELD`, and values outside the enumerations below with
+`POLICY_INVALID_VALUE`. The loader must never silently ignore an input.
+
+## Top-level schema
+
+```json
+{
+  "schema_version": 1,
+  "mode": "dry_run",
+  "default_action": "deny",
+  "workspace": { "roots": ["/work/project"] },
+  "credential_classes": ["ssh_key", "cloud_credential", "dotenv", "keyring", "token_cache"],
+  "destinations": { "allowed_domains": ["api.example.test"], "allowed_cidrs": [] },
+  "taint": { "secret": "deny", "untrusted_input": "audit" },
+  "required_capabilities": ["bpf_lsm", "cgroup_v2", "dns_observation"]
+}
+```
+
+`mode` is `dry_run` or `enforce`. `default_action` is `deny` in v0. Workspace
+roots identify project data and do not by themselves create a taint. The five
+credential classes are recognized sensitive reads and set `secret` taint.
+`untrusted_input` is set by configured untrusted sources and may be `audit` or
+`deny`; `secret` must be `deny`. Both taint bits are monotonic within an
+execution domain. There is no declassification or content inspection in v0.
+
+Destination classes are an allowed DNS domain, an explicit CIDR, and unknown.
+An allowed domain requires same-domain, unexpired observed DNS evidence. An
+explicit CIDR is a separate capability rule. Direct IP, an unobserved resolver
+answer, an expired answer, or a DNS answer from another execution domain is
+`unknown`; it is denied by the v0 default action in enforce mode and recorded
+as a would-deny result in dry-run mode. A secret taint deny takes precedence
+over every destination allow; an untrusted deny follows it.
+
+## Kernel requirements and unsupported cases
+
+`bpf_lsm` is required for protected-read tainting, `cgroup_v2` for connection
+enforcement, and `dns_observation` for domain rules. A policy requiring a
+missing capability is rejected before enforcement with
+`POLICY_CAPABILITY_UNAVAILABLE`; it must not degrade to a claimed enforcement
+mode. Attach coverage is partial until a covered exec and cannot satisfy a
+policy requiring secret-to-egress guarantees.
+
+Encrypted DNS, proxies, shared IP addresses, `/etc/hosts`, resolver cache
+hits, TLS SNI, HTTP Host, Unix sockets, and cross-process dataflow are not
+domain evidence in v0. Use an explicit CIDR where appropriate or accept the
+default-deny result. Policy v0 has no wildcard domains, port rules,
+declassification, or dynamic updates.
+
+## Example behavior
+
+The included [policy fixture](../examples/policy-v0.json) permits an observed,
+unexpired `api.example.test` DNS binding only while no deny taint is present.
+A read of an SSH key wins over this allow and produces a deny. The fixture’s
+validator lives at `tests/semantics/verify_policy_v0.py`.

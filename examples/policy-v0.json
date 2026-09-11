@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "mode": "dry_run",
+  "default_action": "deny",
+  "workspace": {
+    "roots": ["/work/project"]
+  },
+  "credential_classes": ["ssh_key", "cloud_credential", "dotenv", "keyring", "token_cache"],
+  "destinations": {
+    "allowed_domains": ["api.example.test"],
+    "allowed_cidrs": []
+  },
+  "taint": {
+    "secret": "deny",
+    "untrusted_input": "audit"
+  },
+  "required_capabilities": ["bpf_lsm", "cgroup_v2", "dns_observation"]
+}
