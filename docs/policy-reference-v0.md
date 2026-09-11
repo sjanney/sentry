@@ -51,6 +51,16 @@ domain evidence in v0. Use an explicit CIDR where appropriate or accept the
 default-deny result. Policy v0 has no wildcard domains, port rules,
 declassification, or dynamic updates.
 
+## Behavioral profiles
+
+Profiles merge only complete, trusted runs. Their workspace paths, domains, and
+credential classes are sorted sets, and every admitted value retains the IDs of
+the runs that contributed it. This makes merge and diff output deterministic.
+Partial-coverage runs and untrusted observations are retained as profile
+issues, but add no grant. In particular, a malicious observation cannot teach
+the product that credential access is normal. A generated profile remains a
+review artifact; it does not automatically alter an enforcing policy.
+
 ## Example behavior
 
 The included [policy fixture](../examples/policy-v0.json) permits an observed,
