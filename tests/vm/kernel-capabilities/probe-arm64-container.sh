@@ -32,6 +32,10 @@ docker run --rm --privileged \
       tests/vm/kernel-capabilities/seccomp-self-deny.c \
       -o /tmp/seccomp-self-deny
     /tmp/seccomp-self-deny
+    gcc -Wall -Wextra -Werror \
+      tests/vm/kernel-capabilities/seccomp-fallback-deny-socket.c \
+      -o /tmp/seccomp-fallback-deny-socket
+    /tmp/seccomp-fallback-deny-socket
     bpftool btf dump file /sys/kernel/btf/vmlinux format c > /tmp/vmlinux.h
     clang -target bpf -D__TARGET_ARCH_arm64 -O2 -g \
       -I/tmp -I/usr/include/aarch64-linux-gnu \
