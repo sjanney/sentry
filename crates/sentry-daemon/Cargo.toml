@@ -15,3 +15,4 @@ path = "src/main.rs"
 [dependencies]
 sentry-policy = { path = "../sentry-policy" }
 sentry-types = { path = "../sentry-types" }
+sha2 = "0.10.9"
