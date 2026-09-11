@@ -2,6 +2,7 @@
 use std::process;
 
 use sentry_cli::{Capability, CliError, CommandOutcome, attach, capabilities, run_command};
+use sentry_daemon::audit;
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -33,12 +34,23 @@ fn main() {
                 CommandOutcome::Exited(0)
             })
             .map_err(|error| render_error(&error)),
+        Some("audit") if arguments.get(1).map(String::as_str) == Some("verify") => arguments
+            .get(2)
+            .ok_or_else(|| "audit verify requires a log path".to_owned())
+            .and_then(|path| audit::verify(std::path::Path::new(path), None).map_err(|error| render_audit_error(&error)))
+            .map(|checkpoint| {
+                match checkpoint {
+                    Some(checkpoint) => println!("verified audit sequence {} hash {}", checkpoint.sequence, hex(&checkpoint.hash)),
+                    None => println!("verified empty audit log"),
+                }
+                CommandOutcome::Exited(0)
+            }),
         Some("--version" | "version") => {
             println!("sentry {}", env!("CARGO_PKG_VERSION"));
             Ok(CommandOutcome::Exited(0))
         }
         _ => Err(
-            "usage: sentry <run|observe> -- <command> [args...] | attach <pid> | capabilities"
+            "usage: sentry <run|observe> -- <command> [args...] | attach <pid> | capabilities | audit verify <path>"
                 .to_owned(),
         ),
     };
@@ -50,6 +62,20 @@ fn main() {
             process::exit(2);
         }
     }
+}
+
+fn render_audit_error(error: &audit::AuditError) -> String {
+    format!("audit verification failed: {error:?}")
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        output.push(char::from(DIGITS[usize::from(byte & 15)]));
+    }
+    output
 }
 
 fn terminate_with_signal(signal: i32) -> ! {

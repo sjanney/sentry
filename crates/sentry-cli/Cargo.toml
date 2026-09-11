@@ -13,4 +13,5 @@ name = "sentry"
 path = "src/main.rs"
 
 [dependencies]
+sentry-daemon = { path = "../sentry-daemon" }
 sentry-policy = { path = "../sentry-policy" }
