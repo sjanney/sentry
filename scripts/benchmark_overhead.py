@@ -69,7 +69,10 @@ def main() -> int:
     output = Path(os.environ.get("SENTRY_BENCHMARK_OUTPUT", "artifacts/overhead-baseline.json"))
     output.parent.mkdir(parents=True, exist_ok=True)
     prefix = [str(cli), "run", "--"]
-    evidence = {"schema_version": 1,
+    evidence = {"schema_version": 1, "release_gate_open": True,
+                "supported_modes": ["command_wrapper"],
+                "unsupported_modes": ["observe", "dry_run", "enforce", "audit"],
+                "gate_reason": "live observation, enforcement, and audit are not wired into the CLI",
                 "metadata": {"kernel": platform.release(), "machine": platform.machine(),
                              "python": platform.python_version(), "repetitions": REPETITIONS,
                              "warmups": WARMUPS, "cpu_gate_percent": 2},

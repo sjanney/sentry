@@ -16,3 +16,8 @@ This repository is currently being developed from macOS, where the sensor CLI
 intentionally reports an unsupported host. No Linux baseline result is checked
 in yet; the generated artifact is the evidence required before this ticket can
 leave Backlog.
+
+The runner currently measures only the Linux command wrapper. Its JSON marks
+observe, dry-run, enforce, and audit as unsupported and keeps the release gate
+open. Do not use its CPU figure to claim the <2% enforcement target until the
+live modes are wired and measured under the declared matrix.
