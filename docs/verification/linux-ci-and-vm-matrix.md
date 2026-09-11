@@ -23,7 +23,7 @@ bash scripts/verify-linux-arm64-runtime.sh
 
 This executes two independent privileged integration checks:
 
-1. `tests/vm/toolchain-spike/run-arm64-container-probe.sh` compiles the shared
+1. `tests/vm/toolchain-spike/run-linux-container-probe.sh` compiles the shared
    ring-buffer object, then loads and attaches it through Aya and libbpf-rs.
 2. `tests/vm/kernel-capabilities/probe-linux-container.sh` verifies seccomp
    self-denial, BPF-LSM file denial, and cgroup IPv4/IPv6 egress denial using

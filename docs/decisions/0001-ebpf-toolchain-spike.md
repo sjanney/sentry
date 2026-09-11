@@ -58,16 +58,19 @@ Linux `6.12.54-linuxkit`, BTF, cgroup v2, and an active BPF LSM
 (`capability,bpf`). The reproducible container probe in
 `tests/vm/toolchain-spike/` compiles a GPL ring-buffer tracepoint program and
 uses Aya 0.14.0 with Rust 1.92.0 to load and attach it to
-`sched_process_exec`. That Aya arm64 load/attach sub-probe passed.
+`sched_process_exec`, trigger `/bin/true`, and consume the resulting fixed-size
+ring-buffer event. That Aya arm64 sub-probe passed.
 
-The identical object also loaded and attached through libbpf-rs 0.27.1 in the
-same arm64 VM. Its loader necessarily consumes a Clang-produced C BPF object;
+The identical object also loaded, attached, triggered, and consumed the event
+through libbpf-rs 0.27.1 in the same arm64 VM. Its loader necessarily consumes
+a Clang-produced C BPF object;
 therefore libbpf-rs preserves a Rust userspace loader, but it does not preserve
 Rust kernel programs.
 
-This is the first runtime evidence for Aya, but it does **not** establish the
-toolchain decision: event consumption, CO-RE relocation, cgroup egress, file
-enforcement, verifier diagnostics, and x86_64 portability remain untested.
+This is the first runtime evidence for both toolchains, but it does **not**
+establish the toolchain decision: CO-RE relocation, toolchain-specific cgroup
+egress and file-enforcement loading, verifier diagnostics, and x86_64
+portability remain untested.
 
 The documented Aya API includes `Lsm`, `LsmCgroup`, `CgroupSkb`, and BTF-backed
 loading. Its LSM documentation requires a Linux kernel with `CONFIG_BPF_LSM=y`
