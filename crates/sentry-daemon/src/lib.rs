@@ -2,6 +2,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     fs,
+    net::IpAddr,
     os::unix::fs::MetadataExt,
     path::Path,
 };
@@ -309,6 +310,114 @@ fn classify_path(path: &Path) -> Option<CredentialClass> {
         None
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TransportProtocol {
+    Tcp,
+    Udp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResolverProvenance {
+    SystemResolver,
+    AgentObserved,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DnsEvidence {
+    pub domain: String,
+    pub resolver: IpAddr,
+    pub provenance: ResolverProvenance,
+    pub expires_at_ns: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConnectionTarget {
+    DnsCorrelated {
+        domain: String,
+        resolver: IpAddr,
+        provenance: ResolverProvenance,
+    },
+    UnknownDestination,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConnectionObservation {
+    pub run_id: u64,
+    pub destination: IpAddr,
+    pub protocol: TransportProtocol,
+    pub target: ConnectionTarget,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DnsCacheError {
+    Capacity,
+}
+
+/// Bounded, run-scoped evidence for relating observed DNS answers to connects.
+pub struct DnsEvidenceCache {
+    capacity: usize,
+    evidence: HashMap<(u64, IpAddr), DnsEvidence>,
+}
+
+impl DnsEvidenceCache {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            evidence: HashMap::with_capacity(capacity),
+        }
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Capacity` when an unexpired entry cannot be retained.
+    pub fn record(
+        &mut self,
+        run_id: u64,
+        destination: IpAddr,
+        evidence: DnsEvidence,
+        now_ns: u64,
+    ) -> Result<(), DnsCacheError> {
+        self.expire(now_ns);
+        let key = (run_id, destination);
+        if !self.evidence.contains_key(&key) && self.evidence.len() == self.capacity {
+            return Err(DnsCacheError::Capacity);
+        }
+        self.evidence.insert(key, evidence);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn observe_connect(
+        &mut self,
+        run_id: u64,
+        destination: IpAddr,
+        protocol: TransportProtocol,
+        now_ns: u64,
+    ) -> ConnectionObservation {
+        self.expire(now_ns);
+        let target = self.evidence.get(&(run_id, destination)).map_or(
+            ConnectionTarget::UnknownDestination,
+            |evidence| ConnectionTarget::DnsCorrelated {
+                domain: evidence.domain.clone(),
+                resolver: evidence.resolver,
+                provenance: evidence.provenance,
+            },
+        );
+        ConnectionObservation {
+            run_id,
+            destination,
+            protocol,
+            target,
+        }
+    }
+
+    fn expire(&mut self, now_ns: u64) {
+        self.evidence
+            .retain(|_, evidence| evidence.expires_at_ns > now_ns);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +598,84 @@ mod tests {
             assert!(observation.identity.is_some());
         }
         fs::remove_dir_all(root).unwrap();
+    }
+
+    fn dns_evidence(domain: &str, resolver: &str, expires_at_ns: u64) -> DnsEvidence {
+        DnsEvidence {
+            domain: domain.to_owned(),
+            resolver: resolver.parse().unwrap(),
+            provenance: ResolverProvenance::SystemResolver,
+            expires_at_ns,
+        }
+    }
+
+    #[test]
+    fn dns_evidence_correlates_tcp_ipv4_and_udp_ipv6_within_a_run() {
+        let mut cache = DnsEvidenceCache::new(2);
+        let ipv4 = "203.0.113.7".parse().unwrap();
+        let ipv6 = "2001:db8::7".parse().unwrap();
+        cache
+            .record(5, ipv4, dns_evidence("api.example", "192.0.2.53", 10), 1)
+            .unwrap();
+        cache
+            .record(5, ipv6, dns_evidence("dns.example", "2001:db8::53", 10), 1)
+            .unwrap();
+
+        let tcp = cache.observe_connect(5, ipv4, TransportProtocol::Tcp, 2);
+        let udp = cache.observe_connect(5, ipv6, TransportProtocol::Udp, 2);
+        assert_eq!(tcp.protocol, TransportProtocol::Tcp);
+        assert_eq!(udp.protocol, TransportProtocol::Udp);
+        assert!(matches!(
+            tcp.target,
+            ConnectionTarget::DnsCorrelated { ref domain, .. } if domain == "api.example"
+        ));
+        assert!(matches!(
+            udp.target,
+            ConnectionTarget::DnsCorrelated { ref domain, .. } if domain == "dns.example"
+        ));
+    }
+
+    #[test]
+    fn dns_evidence_is_run_scoped_expires_and_is_bounded() {
+        let mut cache = DnsEvidenceCache::new(1);
+        let destination = "203.0.113.9".parse().unwrap();
+        cache
+            .record(
+                1,
+                destination,
+                dns_evidence("short.example", "192.0.2.53", 5),
+                1,
+            )
+            .unwrap();
+        assert_eq!(
+            cache.record(
+                1,
+                "203.0.113.10".parse().unwrap(),
+                dns_evidence("other.example", "192.0.2.53", 6),
+                1
+            ),
+            Err(DnsCacheError::Capacity)
+        );
+        assert_eq!(
+            cache
+                .observe_connect(2, destination, TransportProtocol::Tcp, 2)
+                .target,
+            ConnectionTarget::UnknownDestination
+        );
+        assert_eq!(
+            cache
+                .observe_connect(1, destination, TransportProtocol::Tcp, 5)
+                .target,
+            ConnectionTarget::UnknownDestination
+        );
+        cache
+            .record(
+                1,
+                "203.0.113.10".parse().unwrap(),
+                dns_evidence("other.example", "192.0.2.53", 10),
+                5,
+            )
+            .unwrap();
     }
 
     #[test]
