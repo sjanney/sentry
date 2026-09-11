@@ -9,14 +9,25 @@ struct {
     __type(value, __u8);
 } blocked_tgids SEC(".maps");
 
-SEC("cgroup/connect4")
-int deny_connect4(struct bpf_sock_addr *ctx)
+static __always_inline int deny_connect(struct bpf_sock_addr *ctx)
 {
     __u32 tgid = bpf_get_current_pid_tgid() >> 32;
 
     if (bpf_map_lookup_elem(&blocked_tgids, &tgid))
         return 0;
     return 1;
+}
+
+SEC("cgroup/connect4")
+int deny_connect4(struct bpf_sock_addr *ctx)
+{
+    return deny_connect(ctx);
+}
+
+SEC("cgroup/connect6")
+int deny_connect6(struct bpf_sock_addr *ctx)
+{
+    return deny_connect(ctx);
 }
 
 char LICENSE[] SEC("license") = "GPL";

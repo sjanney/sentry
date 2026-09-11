@@ -15,8 +15,12 @@ configured synthetic inode while allowing a separate workspace fixture; direct,
 hard-link, and symlink opens of the protected inode must all fail. The loader
 uses the Docker Linux VM's PID namespace because the BPF helper reports VM PIDs
 rather than container PID-namespace values. The network attachment test in the
-probe loads a cgroup `connect4` program and verifies it rejects a synthetic
-loopback connection only for the same loader process. The broader CO-RE,
+probe loads cgroup `connect4` and `connect6` programs and verifies they reject
+synthetic direct-IP IPv4/IPv6 TCP and UDP connections only for the same loader
+process. The broader CO-RE,
 verifier-diagnostic, and x86_64 checks in the decision record remain required.
 Inherited descriptors and mmap are explicitly unsupported by this `file_open`
 probe; see `docs/verification/filesystem-enforcement-limitations.md`.
+Pre-existing and inherited sockets plus DNS, rebinding, and proxy attribution
+are unsupported by the egress probe; see
+`docs/verification/egress-enforcement-limitations.md`.
