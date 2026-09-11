@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Policy semantics shared by generation, dry-run, and enforcement.
 
+pub mod compiler;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use sentry_types::EventKind;

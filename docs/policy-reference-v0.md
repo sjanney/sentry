@@ -71,6 +71,17 @@ candidate fixes `mode` to `dry_run`, `default_action` to `deny`, and
 approved candidate. Incomplete and untrusted runs appear only as excluded
 issues, so their observations do not appear as proposed grants.
 
+## Bounded compilation and activation
+
+Before activation, policy compilation rejects unsupported schema versions,
+non-deny defaults, zero policy versions, empty domains, unavailable kernel
+capabilities, and configured map or serialized-size limits. It produces sorted
+domain and CIDR slots plus a stable identity hash over the policy’s semantics.
+The compiled state is built before the active-policy pointer is replaced, so a
+validation failure leaves the previous policy in place. The current activation
+boundary is userspace state; connecting those bounded slots to eBPF maps is
+still required before an enforce-mode kernel claim can be made.
+
 ## Example behavior
 
 The included [policy fixture](../examples/policy-v0.json) permits an observed,
