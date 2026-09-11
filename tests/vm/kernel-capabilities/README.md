@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```sh
-bash tests/vm/kernel-capabilities/probe-arm64-container.sh
+bash tests/vm/kernel-capabilities/probe-linux-container.sh
 ```
 
 The probe reports BTF, cgroup-v2, seccomp mode, and the active-LSM preflight

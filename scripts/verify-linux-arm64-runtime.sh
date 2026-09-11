@@ -8,4 +8,4 @@ if [ "$(docker info --format '{{.Architecture}}')" != "aarch64" ]; then
 fi
 
 bash tests/vm/toolchain-spike/run-arm64-container-probe.sh
-bash tests/vm/kernel-capabilities/probe-arm64-container.sh
+bash tests/vm/kernel-capabilities/probe-linux-container.sh

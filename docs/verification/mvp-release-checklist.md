@@ -12,9 +12,10 @@ Status: **not a demo candidate**. This checklist is a release-blocker record.
 | Verify | CLI SHA-256 audit verification and Python verifier | Partial: no live kernel event emission |
 
 The host-safe suite, policy fixtures, adversarial corpus, and native arm64 hook
-probe pass. The x86_64 runtime cell is unsupported. The performance artifact
-keeps the <2% gate open because live observe, dry-run, enforce, and audit modes
-are not measured.
+probe pass. The native x86_64 probe is implemented but has not yet produced
+runtime evidence on an x86_64 kernel. The performance artifact keeps the <2%
+gate open because live observe, dry-run, enforce, and audit modes are not
+measured.
 
 No tag is permitted until a clean supported Linux environment demonstrates the
 complete `observe → profile → generate → dry-run → enforce → verify` flow and

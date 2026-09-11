@@ -33,7 +33,7 @@ activate kernel enforcement.
 
 Run the host-safe verification suite with `bash scripts/verify.sh`. On a
 native arm64 Linux Docker host, run
-`bash tests/vm/kernel-capabilities/probe-arm64-container.sh` for the privileged
+`bash tests/vm/kernel-capabilities/probe-linux-container.sh` for the privileged
 BPF LSM, cgroup, and seccomp probes. It installs no persistent kernel policy.
 
 ## Architecture and policy
