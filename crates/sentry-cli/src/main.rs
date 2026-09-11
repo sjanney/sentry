@@ -2,12 +2,12 @@
 use std::process;
 
 use sentry_cli::{Capability, CliError, CommandOutcome, attach, capabilities, run_command};
-use sentry_daemon::audit;
+use sentry_daemon::audit::{self, AuditEvent, AuditLog};
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let result: Result<CommandOutcome, String> = match arguments.first().map(String::as_str) {
-        Some("run" | "observe") => {
+        Some("run") => {
             let command = if arguments.get(1).is_some_and(|argument| argument == "--") {
                 &arguments[2..]
             } else {
@@ -19,6 +19,7 @@ fn main() {
                 Err(render_error(&CliError::UnsupportedHost))
             }
         }
+        Some("observe") => observe_command(&arguments[1..]),
         Some("attach") => arguments
             .get(1)
             .ok_or(CliError::InvalidPid)
@@ -62,6 +63,45 @@ fn main() {
             process::exit(2);
         }
     }
+}
+
+fn observe_command(arguments: &[String]) -> Result<CommandOutcome, String> {
+    if std::env::consts::OS != "linux" {
+        return Err(render_error(&CliError::UnsupportedHost));
+    }
+    let Some((flag, remainder)) = arguments.split_first() else {
+        return Err("observe requires --audit-log PATH -- COMMAND".to_owned());
+    };
+    if flag != "--audit-log" || remainder.len() < 3 || remainder[1] != "--" {
+        return Err("observe requires --audit-log PATH -- COMMAND".to_owned());
+    }
+    let run_id = format!("observe-{}", process::id());
+    let mut log = AuditLog::open(&remainder[0]).map_err(|error| render_audit_error(&error))?;
+    log.append(&AuditEvent {
+        sequence: 1,
+        run_id: run_id.clone(),
+        policy_version: 0,
+        policy_hash: 0,
+        decision: "observe_started".to_owned(),
+        rule_id: None,
+        target_class: "command".to_owned(),
+    })
+    .map_err(|error| render_audit_error(&error))?;
+    let outcome = run_command(&remainder[2..]).map_err(|error| render_error(&error))?;
+    log.append(&AuditEvent {
+        sequence: 2,
+        run_id,
+        policy_version: 0,
+        policy_hash: 0,
+        decision: match outcome {
+            CommandOutcome::Exited(_) => "command_exited".to_owned(),
+            CommandOutcome::Signaled(_) => "command_signaled".to_owned(),
+        },
+        rule_id: None,
+        target_class: "command".to_owned(),
+    })
+    .map_err(|error| render_audit_error(&error))?;
+    Ok(outcome)
 }
 
 fn render_audit_error(error: &audit::AuditError) -> String {

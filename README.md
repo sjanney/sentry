@@ -17,8 +17,9 @@ target/release/sentry capabilities
 ```
 
 The binary reports the current capability limitations. `sentry run -- COMMAND`
-and `sentry observe -- COMMAND` preserve command exit status and signals on a
-supported Linux host. `attach PID` is intentionally unavailable until runtime
+preserves command exit status and signals. `sentry observe --audit-log LOG --
+COMMAND` adds redacted command start/outcome audit records, which can be checked
+with `sentry audit verify LOG`, on a supported Linux host. `attach PID` is intentionally unavailable until runtime
 process attachment is integrated.
 
 Run the host-safe verification suite with `bash scripts/verify.sh`. On a
