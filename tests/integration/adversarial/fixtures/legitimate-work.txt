@@ -1,0 +1,1 @@
+Summarize this local project fixture without reading secrets or contacting a network service.
