@@ -175,6 +175,96 @@ pub fn merge_profile(
     Ok(profile)
 }
 
+/// Renders a deterministic, review-only policy candidate from trusted profile data.
+#[must_use]
+pub fn render_policy_candidate(profile: &BehavioralProfile) -> String {
+    let mut output = String::from(
+        "# Sentry policy candidate v0\n# Review required: this file is not active policy.\n\
+         schema_version = 1\nmode = \"dry_run\"\ndefault_action = \"deny\"\nactivation = false\n\n",
+    );
+    append_candidate_section(
+        &mut output,
+        "workspace paths",
+        "workspace:",
+        &profile.workspace_paths,
+        &profile.provenance,
+    );
+    append_candidate_section(
+        &mut output,
+        "allowed domains",
+        "domain:",
+        &profile.domains,
+        &profile.provenance,
+    );
+    output.push_str("[credential classes]\n");
+    for class in &profile.credential_classes {
+        let key = format!("credential:{class:?}");
+        append_candidate_value(
+            &mut output,
+            &format!("{class:?}"),
+            &key,
+            &profile.provenance,
+        );
+    }
+    if profile.credential_classes.is_empty() {
+        output.push_str("# No credential classes were learned.\n");
+    }
+    output.push_str("\n[profile issues]\n");
+    if profile.issues.is_empty() {
+        output.push_str("# No incomplete or untrusted runs were supplied.\n");
+    } else {
+        for issue in &profile.issues {
+            match issue {
+                ProfileIssue::IncompleteRun { run_id } => {
+                    output.push_str("# incomplete run excluded: ");
+                    output.push_str(run_id);
+                    output.push('\n');
+                }
+                ProfileIssue::UntrustedRun { run_id } => {
+                    output.push_str("# untrusted run excluded: ");
+                    output.push_str(run_id);
+                    output.push('\n');
+                }
+            }
+        }
+    }
+    output
+}
+
+fn append_candidate_section(
+    output: &mut String,
+    heading: &str,
+    prefix: &str,
+    values: &BTreeSet<String>,
+    provenance: &BTreeMap<String, BTreeSet<String>>,
+) {
+    output.push('[');
+    output.push_str(heading);
+    output.push_str("]\n");
+    if values.is_empty() {
+        output.push_str("# No values were learned.\n");
+    }
+    for value in values {
+        append_candidate_value(output, value, &format!("{prefix}{value}"), provenance);
+    }
+    output.push('\n');
+}
+
+fn append_candidate_value(
+    output: &mut String,
+    value: &str,
+    key: &str,
+    provenance: &BTreeMap<String, BTreeSet<String>>,
+) {
+    let runs = provenance.get(key).map_or_else(String::new, |runs| {
+        runs.iter().cloned().collect::<Vec<_>>().join(", ")
+    });
+    output.push_str(value);
+    output.push_str(" # observed in runs: ");
+    output.push_str(&runs);
+    output.push('\n');
+}
+
 fn add_profile_values(
     destination: &mut BTreeSet<String>,
     provenance: &mut BTreeMap<String, BTreeSet<String>>,
@@ -376,5 +466,34 @@ mod tests {
                 run_id: "run-1".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn policy_candidate_is_review_only_stable_and_explains_its_sources() {
+        let trusted = observation(
+            "run-1",
+            RunCompleteness::Complete,
+            ObservationTrust::Trusted,
+            &["/work/project"],
+            &["api.example.test"],
+            &[ProfileCredentialClass::TokenCache],
+        );
+        let untrusted = observation(
+            "attacker",
+            RunCompleteness::Complete,
+            ObservationTrust::Untrusted,
+            &[],
+            &["attacker.example.test"],
+            &[ProfileCredentialClass::SshKey],
+        );
+        let candidate = render_policy_candidate(&merge_profile([trusted, untrusted]).unwrap());
+        assert!(candidate.starts_with("# Sentry policy candidate v0"));
+        assert!(candidate.contains("mode = \"dry_run\""));
+        assert!(candidate.contains("default_action = \"deny\""));
+        assert!(candidate.contains("activation = false"));
+        assert!(candidate.contains("api.example.test # observed in runs: run-1"));
+        assert!(candidate.contains("untrusted run excluded: attacker"));
+        assert!(!candidate.contains("attacker.example.test"));
+        assert!(!candidate.contains("SshKey # observed"));
     }
 }

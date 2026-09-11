@@ -61,6 +61,16 @@ issues, but add no grant. In particular, a malicious observation cannot teach
 the product that credential access is normal. A generated profile remains a
 review artifact; it does not automatically alter an enforcing policy.
 
+## Candidate generation
+
+`render_policy_candidate` produces a human-readable review artifact with stable
+sorted sections for workspace paths, domains, and credential classes. Every
+admitted line names the trusted complete runs that observed it. The rendered
+candidate fixes `mode` to `dry_run`, `default_action` to `deny`, and
+`activation` to `false`; a reviewer must explicitly translate and apply an
+approved candidate. Incomplete and untrusted runs appear only as excluded
+issues, so their observations do not appear as proposed grants.
+
 ## Example behavior
 
 The included [policy fixture](../examples/policy-v0.json) permits an observed,
