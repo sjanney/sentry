@@ -25,8 +25,9 @@ This executes two independent privileged integration checks:
 
 1. `tests/vm/toolchain-spike/run-arm64-container-probe.sh` compiles the shared
    ring-buffer object, then loads and attaches it through Aya and libbpf-rs.
-2. `tests/vm/kernel-capabilities/probe-arm64-container.sh` verifies seccomp
-   self-denial, BPF-LSM file denial, and cgroup `connect4` denial.
+2. `tests/vm/kernel-capabilities/probe-linux-container.sh` verifies seccomp
+   self-denial, BPF-LSM file denial, and cgroup IPv4/IPv6 egress denial using
+   the native kernel architecture's BPF target.
 
 The recorded local evidence is Linux `6.12.54-linuxkit` on arm64 with BTF,
 cgroup v2, and `capability,bpf` active. Both integration commands passed on
@@ -34,8 +35,8 @@ cgroup v2, and `capability,bpf` active. Both integration commands passed on
 
 ## Real x86_64 runtime requirement
 
-Before the toolchain or kernel matrix decisions are closed, run the same
-privileged integration commands on a real x86_64 Linux VM with BTF and BPF LSM
-enabled. Record its kernel release, active LSM list, BTF source, and output in
-this document. Do not count Docker `--platform linux/amd64` on an arm64 host as
-x86_64 kernel validation; it is userspace emulation over an arm64 kernel.
+Run `bash scripts/run_security_matrix.sh` on a real x86_64 Linux VM with BTF
+and BPF LSM enabled. Record its kernel release, active LSM list, BTF source,
+and output in this document. Do not count Docker `--platform linux/amd64` on an
+arm64 host as x86_64 kernel validation; it is userspace emulation over an arm64
+kernel.

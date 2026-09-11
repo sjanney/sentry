@@ -15,12 +15,9 @@ kernel=$(uname -r)
   echo '- fallback mode: seccomp socket-deny probe'
   echo
   echo '## Result'
-  if [[ "$machine" == 'aarch64' || "$machine" == 'arm64' ]]; then
-    bash tests/vm/kernel-capabilities/probe-arm64-container.sh
-    echo 'native arm64 cell: passed'
-  elif [[ "$machine" == 'x86_64' ]]; then
-    echo 'x86_64 native probe: unsupported until an x86 BPF compile and runtime probe are added'
-    exit 2
+  if [[ "$machine" == 'aarch64' || "$machine" == 'arm64' || "$machine" == 'x86_64' ]]; then
+    bash tests/vm/kernel-capabilities/probe-linux-container.sh
+    echo "native $machine cell: passed"
   else
     echo "unsupported native architecture: $machine"
     exit 2
