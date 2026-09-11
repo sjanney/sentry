@@ -3,6 +3,13 @@ use std::process;
 
 use sentry_cli::{Capability, CliError, CommandOutcome, attach, capabilities, run_command};
 use sentry_daemon::audit::{self, AuditEvent, AuditLog};
+use sentry_policy::{
+    Destination, TaintMask,
+    compiler::{
+        KernelCapability, KernelPolicyLimits, PolicyMode, PolicySpec, compile_kernel_policy,
+    },
+};
+use std::collections::BTreeSet;
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -46,12 +53,13 @@ fn main() {
                 }
                 CommandOutcome::Exited(0)
             }),
+        Some("dry-run") => dry_run(&arguments[1..]),
         Some("--version" | "version") => {
             println!("sentry {}", env!("CARGO_PKG_VERSION"));
             Ok(CommandOutcome::Exited(0))
         }
         _ => Err(
-            "usage: sentry <run|observe> -- <command> [args...] | attach <pid> | capabilities | audit verify <path>"
+            "usage: sentry <run|observe> -- <command> [args...] | dry-run --allow-domain DOMAIN --domain DOMAIN [--secret] | attach <pid> | capabilities | audit verify <path>"
                 .to_owned(),
         ),
     };
@@ -63,6 +71,71 @@ fn main() {
             process::exit(2);
         }
     }
+}
+
+fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {
+    let mut allowed = None;
+    let mut domain = None;
+    let mut secret = false;
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--allow-domain" => {
+                index += 1;
+                allowed = arguments.get(index).cloned();
+            }
+            "--domain" => {
+                index += 1;
+                domain = arguments.get(index).cloned();
+            }
+            "--secret" => secret = true,
+            _ => return Err("unknown dry-run option".to_owned()),
+        }
+        index += 1;
+    }
+    let allowed = allowed.ok_or_else(|| "dry-run requires --allow-domain DOMAIN".to_owned())?;
+    let domain = domain.ok_or_else(|| "dry-run requires --domain DOMAIN".to_owned())?;
+    let capabilities = BTreeSet::from([
+        KernelCapability::BpfLsm,
+        KernelCapability::CgroupV2,
+        KernelCapability::DnsObservation,
+    ]);
+    let policy = PolicySpec {
+        schema_version: 1,
+        policy_version: 1,
+        mode: PolicyMode::DryRun,
+        default_deny: true,
+        allowed_domains: BTreeSet::from([allowed]),
+        allowed_cidrs: BTreeSet::new(),
+        required_capabilities: capabilities.clone(),
+    };
+    let compiled = compile_kernel_policy(
+        &policy,
+        &capabilities,
+        KernelPolicyLimits {
+            max_domains: 16,
+            max_cidrs: 16,
+            max_serialized_bytes: 4096,
+        },
+    )
+    .map_err(|error| format!("dry-run policy error: {error:?}"))?;
+    let verdict = compiled.dry_run_egress(
+        TaintMask {
+            secret,
+            untrusted_input: false,
+        },
+        Destination {
+            domain: Some(&domain),
+            dns_observed: true,
+            ttl_valid: true,
+            same_execution_domain: true,
+        },
+    );
+    println!(
+        "policy_hash={} would_deny={} rule_id={:?} explanation={}",
+        verdict.policy_hash, verdict.would_deny, verdict.rule_id, verdict.explanation
+    );
+    Ok(CommandOutcome::Exited(0))
 }
 
 fn observe_command(arguments: &[String]) -> Result<CommandOutcome, String> {

@@ -22,6 +22,11 @@ COMMAND` adds redacted command start/outcome audit records, which can be checked
 with `sentry audit verify LOG`, on a supported Linux host. `attach PID` is intentionally unavailable until runtime
 process attachment is integrated.
 
+Use `sentry dry-run --allow-domain api.example.test --domain api.example.test
+--secret` to evaluate the compiled policy and print its hash, matched rule, and
+would-deny explanation. It is a local policy-semantic command; it does not
+activate kernel enforcement.
+
 Run the host-safe verification suite with `bash scripts/verify.sh`. On a
 native arm64 Linux Docker host, run
 `bash tests/vm/kernel-capabilities/probe-arm64-container.sh` for the privileged
