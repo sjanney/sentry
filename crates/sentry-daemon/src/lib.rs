@@ -7,6 +7,7 @@ use std::{
     path::Path,
 };
 
+use sentry_policy::TaintMask;
 use sentry_types::EventHeader;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,6 +93,7 @@ struct ProcessRecord {
     run_id: u64,
     parent: Option<ProcessKey>,
     coverage: Coverage,
+    taint: TaintMask,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -126,6 +128,7 @@ impl ProcessTracker {
                 run_id,
                 parent: None,
                 coverage: Coverage::Launch,
+                taint: TaintMask::default(),
             },
         )
     }
@@ -140,6 +143,7 @@ impl ProcessTracker {
                 run_id,
                 parent: None,
                 coverage: Coverage::AttachPartial,
+                taint: TaintMask::default(),
             },
         )
     }
@@ -159,6 +163,7 @@ impl ProcessTracker {
                 run_id: parent_record.run_id,
                 parent: Some(parent),
                 coverage: parent_record.coverage,
+                taint: parent_record.taint,
             },
         )
     }
@@ -195,6 +200,43 @@ impl ProcessTracker {
     #[must_use]
     pub fn can_claim_full_coverage(&self, key: ProcessKey) -> bool {
         self.coverage(key) == Some(Coverage::Launch)
+    }
+
+    /// Applies a monotonic taint transition before the caller evaluates egress.
+    ///
+    /// # Errors
+    ///
+    /// Returns `UnknownChild` when the process identity is no longer live.
+    pub fn taint(
+        &mut self,
+        key: ProcessKey,
+        transition: TaintMask,
+    ) -> Result<TaintMask, TrackerError> {
+        let record = self
+            .processes
+            .get_mut(&key)
+            .ok_or(TrackerError::UnknownChild)?;
+        record.taint.secret |= transition.secret;
+        record.taint.untrusted_input |= transition.untrusted_input;
+        Ok(record.taint)
+    }
+
+    /// Returns the taint that an immediate subsequent egress decision must read.
+    #[must_use]
+    pub fn taint_at_egress(&self, key: ProcessKey) -> Option<TaintMask> {
+        self.processes.get(&key).map(|record| record.taint)
+    }
+
+    /// Records exec without clearing taint or changing coverage.
+    ///
+    /// # Errors
+    ///
+    /// Returns `UnknownChild` when the process identity is no longer live.
+    pub fn exec(&mut self, key: ProcessKey) -> Result<(), TrackerError> {
+        self.processes
+            .contains_key(&key)
+            .then_some(())
+            .ok_or(TrackerError::UnknownChild)
     }
 
     fn insert(&mut self, key: ProcessKey, record: ProcessRecord) -> Result<(), TrackerError> {
@@ -527,6 +569,42 @@ mod tests {
         assert_eq!(tracker.fork(root, child), Err(TrackerError::UnknownParent));
         tracker.register_launch(root, 1).unwrap();
         assert_eq!(tracker.fork(root, child), Err(TrackerError::Capacity));
+    }
+
+    #[test]
+    fn taint_is_monotonic_and_inherited_before_egress() {
+        let parent = key(10, 100);
+        let child = key(11, 101);
+        let mut tracker = ProcessTracker::new(2);
+        tracker.register_launch(parent, 1).unwrap();
+        let taint = tracker
+            .taint(
+                parent,
+                TaintMask {
+                    secret: true,
+                    untrusted_input: false,
+                },
+            )
+            .unwrap();
+        assert!(taint.secret);
+        tracker.fork(parent, child).unwrap();
+        tracker.exec(child).unwrap();
+        assert_eq!(tracker.taint_at_egress(child), Some(taint));
+        assert_eq!(
+            tracker.taint(
+                child,
+                TaintMask {
+                    secret: false,
+                    untrusted_input: true,
+                }
+            ),
+            Ok(TaintMask {
+                secret: true,
+                untrusted_input: true,
+            })
+        );
+        assert!(tracker.exit(child));
+        assert_eq!(tracker.taint_at_egress(child), None);
     }
 
     #[test]
