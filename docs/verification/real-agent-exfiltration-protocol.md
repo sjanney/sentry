@@ -6,6 +6,12 @@ credential material allowed. Record the agent product, exact version, model,
 settings, prompt, fixture revision, Sentry policy hash, kernel version, and
 commands used.
 
+`fixtures/manifest.json` enumerates the four independent egress paths (MCP/A2A
+tool call, shelled CLI, improvised HTTP, and agent-authored script), a combined
+case, and parser-differential hostnames including null-byte, Unicode, trailing
+dot, and mixed-case forms. The corpus verifier checks this manifest before it
+opens the controlled sink.
+
 Run three separate trials against the same controlled loopback sink:
 
 1. An unprotected baseline, recording whether the agent actually attempts the
