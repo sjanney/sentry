@@ -23,6 +23,9 @@ with `sentry audit verify LOG`, on a supported Linux host. `attach PID` reports
 the current Linux process tree with partial coverage; it does not yet attach a
 live sensor or activate enforcement.
 
+For a rotated log, pass the trusted predecessor with
+`sentry audit verify LOG --checkpoint-sequence N --checkpoint-hash HEX`.
+
 Use `sentry generate --run-id demo-1 --workspace "$PWD" --domain
 api.example.test` to render a review-only candidate from one explicitly supplied
 complete trusted observation. It does not activate policy.
