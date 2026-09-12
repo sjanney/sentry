@@ -50,8 +50,20 @@ impl AuditLog {
     /// # Errors
     /// Returns an I/O or integrity error for any complete invalid record.
     pub fn open(path: impl Into<std::path::PathBuf>) -> Result<Self, AuditError> {
+        Self::open_with_checkpoint(path, None)
+    }
+
+    /// Opens a log that follows an externally trusted checkpoint from a
+    /// rotated predecessor. The first record must reference that checkpoint.
+    ///
+    /// # Errors
+    /// Returns an I/O or integrity error for any complete invalid record.
+    pub fn open_with_checkpoint(
+        path: impl Into<std::path::PathBuf>,
+        checkpoint: Option<&AuditCheckpoint>,
+    ) -> Result<Self, AuditError> {
         let path = path.into();
-        let last = recover(&path)?;
+        let last = recover(&path, checkpoint)?;
         Ok(Self { path, last })
     }
 
@@ -96,9 +108,12 @@ pub fn verify(
     verify_bytes(&fs::read(path)?, checkpoint)
 }
 
-fn recover(path: &Path) -> Result<Option<AuditCheckpoint>, AuditError> {
+fn recover(
+    path: &Path,
+    checkpoint: Option<&AuditCheckpoint>,
+) -> Result<Option<AuditCheckpoint>, AuditError> {
     if !path.exists() {
-        return Ok(None);
+        return Ok(checkpoint.cloned());
     }
     let bytes = fs::read(path)?;
     if !bytes.ends_with(b"\n") {
@@ -108,9 +123,9 @@ fn recover(path: &Path) -> Result<Option<AuditCheckpoint>, AuditError> {
             .map_or(0, |index| index + 1);
         let complete = &bytes[..complete_length];
         fs::write(path, complete)?;
-        return verify_bytes(complete, None);
+        return verify_bytes(complete, checkpoint);
     }
-    verify_bytes(&bytes, None)
+    verify_bytes(&bytes, checkpoint)
 }
 
 fn verify_bytes(
@@ -247,5 +262,21 @@ mod tests {
             .unwrap();
         assert_eq!(AuditLog::open(&path).unwrap().last, Some(checkpoint));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rotated_log_continues_from_trusted_checkpoint() {
+        let first_path = path("rotation-first");
+        let next_path = path("rotation-next");
+        let mut first_log = AuditLog::open(&first_path).unwrap();
+        let checkpoint = first_log.append(&event(1)).unwrap();
+        fs::rename(&first_path, &next_path).unwrap();
+        let mut next_log = AuditLog::open_with_checkpoint(&first_path, Some(&checkpoint)).unwrap();
+        let next = next_log.append(&event(2)).unwrap();
+        assert_eq!(next.sequence, 2);
+        assert!(verify(&next_path, None).is_ok());
+        assert!(verify(&first_path, Some(&checkpoint)).is_ok());
+        let _ = fs::remove_file(next_path);
+        let _ = fs::remove_file(first_path);
     }
 }
