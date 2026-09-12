@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Read-only Linux enforcement preflight checks.
 
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
+
+use sentry_policy::compiler::KernelCapability;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct KernelPreflight {
@@ -24,6 +26,22 @@ impl KernelPreflight {
             bpf_lsm_active,
             cgroup_v2_available,
         }
+    }
+
+    /// Returns only policy capabilities directly established by this preflight.
+    ///
+    /// DNS observation is intentionally absent because this read-only probe does
+    /// not inspect or attach a DNS sensor.
+    #[must_use]
+    pub fn available_capabilities(&self) -> BTreeSet<KernelCapability> {
+        let mut capabilities = BTreeSet::new();
+        if self.bpf_lsm_active {
+            capabilities.insert(KernelCapability::BpfLsm);
+        }
+        if self.cgroup_v2_available {
+            capabilities.insert(KernelCapability::CgroupV2);
+        }
+        capabilities
     }
 }
 
@@ -74,5 +92,18 @@ mod tests {
         .unwrap();
         assert_eq!(KernelPreflight::inspect(&root), KernelPreflight::default());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn capability_projection_contains_only_observed_features() {
+        let preflight = KernelPreflight {
+            btf_readable: true,
+            bpf_lsm_active: true,
+            cgroup_v2_available: false,
+        };
+        assert_eq!(
+            preflight.available_capabilities(),
+            BTreeSet::from([KernelCapability::BpfLsm])
+        );
     }
 }
