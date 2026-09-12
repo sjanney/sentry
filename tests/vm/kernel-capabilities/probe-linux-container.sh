@@ -2,7 +2,7 @@
 # Runs the privileged hook probes on the host kernel architecture.
 set -euo pipefail
 
-docker run --rm --privileged \
+docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
   --pid=host \
   --mount "type=bind,source=$(pwd),target=/work,readonly" \
   --workdir /work \
@@ -29,6 +29,11 @@ docker run --rm --privileged \
     mount -t securityfs securityfs /sys/kernel/security 2>/dev/null || true
 
     printf "kernel="; uname -r
+    printf "arch="; uname -m
+    if test -n "${SENTRY_EXPECT_ARCH:-}" && test "${SENTRY_EXPECT_ARCH}" != "$(uname -m)"; then
+      echo "unexpected architecture: expected ${SENTRY_EXPECT_ARCH}, got $(uname -m)" >&2
+      exit 2
+    fi
     test -r /sys/kernel/btf/vmlinux && echo "btf=present" || echo "btf=missing"
     test -e /sys/fs/cgroup/cgroup.controllers && echo "cgroup_v2=present" || echo "cgroup_v2=missing"
     awk "/^Seccomp:/{print \"seccomp_mode=\" \$2}" /proc/self/status

@@ -6,6 +6,9 @@ Run from the repository root:
 bash tests/vm/kernel-capabilities/probe-linux-container.sh
 ```
 
+Set `SENTRY_EXPECT_ARCH` (for example, `SENTRY_EXPECT_ARCH=aarch64`) to make a
+matrix run fail closed when Docker exposes a different kernel architecture.
+
 The probe reports BTF, cgroup-v2, seccomp mode, and the active-LSM preflight
 state from a privileged disposable Docker Linux container. It deliberately
 does not call a preflight result proof of enforcement. It also proves a
