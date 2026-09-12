@@ -35,6 +35,9 @@ if cargo run -q -p sentry-cli -- dry-run --allow-cidr 198.51.100.0/24 --ip inval
 fi
 
 if [[ $(uname -s) == Linux ]]; then
+  capabilities=$(cargo run -q -p sentry-cli -- capabilities)
+  grep -Fq 'kernel: ' <<<"$capabilities"
+  grep -Fq 'arch: ' <<<"$capabilities"
   audit_log="$workdir/audit.log"
   cargo run -q -p sentry-cli -- observe --audit-log "$audit_log" -- sh -c 'exit 0'
   audit_result=$(cargo run -q -p sentry-cli -- audit verify "$audit_log")

@@ -36,6 +36,12 @@ fn main() {
         Some("capabilities") => capabilities(std::env::consts::OS)
             .map(|capabilities| {
                 let preflight = KernelPreflight::inspect(std::path::Path::new("/"));
+                let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").map_or_else(
+                    |_| "unavailable".to_owned(),
+                    |release| release.trim().to_owned(),
+                );
+                println!("kernel: {kernel}");
+                println!("arch: {}", std::env::consts::ARCH);
                 println!(
                     "btf: {} (preflight)",
                     if preflight.btf_readable {
