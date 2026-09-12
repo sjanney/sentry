@@ -38,8 +38,8 @@ activate kernel enforcement.
 CIDR rules can be evaluated with `sentry dry-run --allow-cidr 198.51.100.0/24
 --ip 198.51.100.7`.
 
-Run the host-safe verification suite with `bash scripts/verify.sh`. On a
-native arm64 Linux Docker host, run
+Run the host-safe verification suite with `bash scripts/verify.sh`. On an
+arm64 Linux Docker host, run
 `bash tests/vm/kernel-capabilities/probe-linux-container.sh` for the privileged
 BPF LSM, cgroup, and seccomp probes. It installs no persistent kernel policy.
 
@@ -68,8 +68,8 @@ attribution, or domain proof from TLS SNI/HTTP Host.
 
 | Target | Primary hook evidence | Fallback | Status |
 | --- | --- | --- | --- |
-| Native arm64 Linux | BPF LSM `file_open`; cgroup IPv4/IPv6 TCP/UDP | seccomp socket deny | Probe passes |
-| Native x86_64 Linux | Not yet run | Not yet run | Unsupported |
+| arm64 Linux Docker probe | BPF LSM `file_open`; cgroup IPv4/IPv6 TCP/UDP | seccomp socket deny | Probe passes |
+| x86_64 Linux | Not yet run | Not yet run | Unsupported |
 | macOS/Windows | None | None | Unsupported |
 
 The fallback supports only launch-time default-deny egress with no allowed
