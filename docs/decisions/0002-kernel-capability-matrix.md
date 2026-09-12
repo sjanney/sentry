@@ -76,8 +76,10 @@ libbpf-rs. The kernel-capability probe also installed a minimal seccomp-BPF
 filter in a disposable process and verified that it denied `getppid` with
 `EPERM`. It loaded a BPF LSM `file_open` program that denied a synthetic file
 with `EACCES`, and attached a cgroup `connect4` program that denied a synthetic
-loopback connection with `EPERM`. This is runtime evidence for the Full-
-enforce tier on this arm64 Docker VM.
+loopback connection with `EPERM`. This is runtime evidence that the individual
+hook mechanisms are available on this arm64 Docker VM. It does not establish
+Sentry's Full-enforce tier because the daemon has not yet loaded these programs
+for an agent process.
 
 ## Open acceptance evidence
 
