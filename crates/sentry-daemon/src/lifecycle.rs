@@ -47,6 +47,10 @@ impl Lifecycle {
         self.state
     }
     #[must_use]
+    pub fn accepts_new_runs(&self) -> bool {
+        self.state != RuntimeState::RefusingNewRuns
+    }
+    #[must_use]
     pub fn faults(&self) -> &[Fault] {
         &self.faults
     }
@@ -101,6 +105,7 @@ mod tests {
             lifecycle.activate(1).unwrap();
             lifecycle.report_fault(fault);
             assert_eq!(lifecycle.state(), RuntimeState::RefusingNewRuns);
+            assert!(!lifecycle.accepts_new_runs());
             assert_eq!(lifecycle.activate(2), Err(RuntimeState::RefusingNewRuns));
             assert_eq!(lifecycle.faults(), &[fault]);
         }
@@ -114,5 +119,6 @@ mod tests {
         assert_eq!(lifecycle.active_policy(), Some(1));
         lifecycle.report_fault(Fault::EventLoss);
         assert_eq!(lifecycle.state(), RuntimeState::AuditIncomplete);
+        assert!(lifecycle.accepts_new_runs());
     }
 }
