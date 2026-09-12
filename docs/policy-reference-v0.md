@@ -48,6 +48,9 @@ missing capability is rejected before enforcement with
 mode. Attach coverage is partial until a covered exec and cannot satisfy a
 policy requiring secret-to-egress guarantees.
 
+Allowed domains are exact, non-wildcard names. Empty, control-character, or
+whitespace-containing domain rules are rejected during compilation.
+
 Encrypted DNS, proxies, shared IP addresses, `/etc/hosts`, resolver cache
 hits, TLS SNI, HTTP Host, Unix sockets, and cross-process dataflow are not
 domain evidence in v0. Use an explicit CIDR where appropriate or accept the
