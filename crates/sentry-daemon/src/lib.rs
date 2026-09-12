@@ -352,7 +352,10 @@ impl Default for CredentialCatalog {
 fn classify_path(path: &Path) -> Option<CredentialClass> {
     let text = path.to_string_lossy();
     let file_name = path.file_name()?.to_string_lossy();
-    if text.contains("/.ssh/") && file_name.starts_with("id_") {
+    let in_ssh_directory = path
+        .components()
+        .any(|component| component.as_os_str() == ".ssh");
+    if in_ssh_directory && file_name.starts_with("id_") {
         Some(CredentialClass::SshKey)
     } else if text.ends_with("/.aws/credentials")
         || text.contains("/gcloud/")
@@ -749,6 +752,16 @@ mod tests {
             assert!(observation.identity.is_some());
         }
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn credential_classifier_handles_relative_ssh_paths() {
+        let observation = CredentialCatalog::new()
+            .observe(Path::new(".ssh/id_rsa"), FileAccessOutcome::Attempted);
+        assert_eq!(
+            observation.target,
+            ObservedTarget::Credential(CredentialClass::SshKey)
+        );
     }
 
     fn dns_evidence(domain: &str, resolver: &str, expires_at_ns: u64) -> DnsEvidence {
