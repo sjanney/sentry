@@ -28,6 +28,20 @@ static int expect_ipv4_deny(int socket_type)
     return 0;
 }
 
+static int expect_existing_ipv4_socket_deny(int fd)
+{
+    const struct sockaddr_in address = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
+        .sin_port = htons(9),
+    };
+    if (connect(fd, (const struct sockaddr *)&address, sizeof(address)) != -1 || errno != EPERM) {
+        fprintf(stderr, "expected pre-activation IPv4 socket to fail with EPERM, errno=%d\n", errno);
+        return -1;
+    }
+    return 0;
+}
+
 static int expect_ipv6_deny(int socket_type)
 {
     const struct sockaddr_in6 address = {
@@ -57,11 +71,17 @@ int main(int argc, char **argv)
     uint32_t tgid = (uint32_t)getpid();
     uint8_t enabled = 1;
     int cgroup_fd = -1;
+    int pre_activation_socket = -1;
     int result = 1;
 
     if (argc != 2) {
         fprintf(stderr, "usage: %s BPF_OBJECT\n", argv[0]);
         return 2;
+    }
+    pre_activation_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (pre_activation_socket < 0) {
+        perror("create pre-activation socket");
+        goto out;
     }
     cgroup_fd = open("/sys/fs/cgroup", O_RDONLY | O_DIRECTORY);
     if (cgroup_fd < 0) {
@@ -93,7 +113,9 @@ int main(int argc, char **argv)
     if (expect_ipv4_deny(SOCK_STREAM) != 0 || expect_ipv4_deny(SOCK_DGRAM) != 0 ||
         expect_ipv6_deny(SOCK_STREAM) != 0 || expect_ipv6_deny(SOCK_DGRAM) != 0)
         goto out;
-    puts("cgroup IPv4/IPv6 TCP/UDP egress denials succeeded");
+    if (expect_existing_ipv4_socket_deny(pre_activation_socket) != 0)
+        goto out;
+    puts("cgroup IPv4/IPv6 TCP/UDP and pre-activation socket egress denials succeeded");
     result = 0;
 
 out:
@@ -105,5 +127,7 @@ out:
         bpf_object__close(object);
     if (cgroup_fd >= 0)
         close(cgroup_fd);
+    if (pre_activation_socket >= 0)
+        close(pre_activation_socket);
     return result;
 }
