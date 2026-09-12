@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, net::IpAddr, sync::RwLock};
 
 use crate::{Destination, EgressDecision, EgressPolicy, TaintMask, decide_egress};
@@ -321,38 +322,37 @@ impl Default for PolicyActivation {
 }
 
 fn policy_hash(policy: &PolicySpec) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    hash_bytes(&mut hash, &policy.schema_version.to_le_bytes());
-    hash_bytes(&mut hash, &policy.policy_version.to_le_bytes());
-    hash_bytes(&mut hash, &[u8::from(policy.default_deny)]);
-    hash_bytes(&mut hash, &[u8::from(policy.deny_untrusted_egress)]);
-    hash_bytes(
-        &mut hash,
-        &[match policy.mode {
-            PolicyMode::DryRun => 0,
-            PolicyMode::Enforce => 1,
-        }],
-    );
-    hash_bytes(&mut hash, b"capabilities");
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&policy.schema_version.to_le_bytes());
+    bytes.extend_from_slice(&policy.policy_version.to_le_bytes());
+    bytes.push(u8::from(policy.default_deny));
+    bytes.push(u8::from(policy.deny_untrusted_egress));
+    bytes.push(match policy.mode {
+        PolicyMode::DryRun => 0,
+        PolicyMode::Enforce => 1,
+    });
+    bytes.extend_from_slice(b"capabilities\0");
     for capability in &policy.required_capabilities {
-        hash_bytes(
-            &mut hash,
-            &[match capability {
-                KernelCapability::BpfLsm => 0,
-                KernelCapability::CgroupV2 => 1,
-                KernelCapability::DnsObservation => 2,
-            }],
-        );
+        bytes.push(match capability {
+            KernelCapability::BpfLsm => 0,
+            KernelCapability::CgroupV2 => 1,
+            KernelCapability::DnsObservation => 2,
+        });
     }
-    hash_bytes(&mut hash, b"domains");
+    bytes.extend_from_slice(b"domains\0");
     for value in &policy.allowed_domains {
-        hash_bytes(&mut hash, value.as_bytes());
+        append_length_delimited(&mut bytes, value.as_bytes());
     }
-    hash_bytes(&mut hash, b"cidrs");
+    bytes.extend_from_slice(b"cidrs\0");
     for value in &policy.allowed_cidrs {
-        hash_bytes(&mut hash, value.as_bytes());
+        append_length_delimited(&mut bytes, value.as_bytes());
     }
-    hash
+    let digest = Sha256::digest(bytes);
+    u64::from_le_bytes(
+        digest[..8]
+            .try_into()
+            .expect("SHA-256 digest is at least 8 bytes"),
+    )
 }
 
 fn is_valid_cidr(value: &str) -> bool {
@@ -372,11 +372,9 @@ fn is_valid_cidr(value: &str) -> bool {
         }
 }
 
-fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
-    for byte in bytes.iter().copied().chain(std::iter::once(0)) {
-        *hash ^= u64::from(byte);
-        *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
+fn append_length_delimited(output: &mut Vec<u8>, value: &[u8]) {
+    output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    output.extend_from_slice(value);
 }
 
 #[cfg(test)]
