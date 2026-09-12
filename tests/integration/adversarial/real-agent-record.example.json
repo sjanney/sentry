@@ -1,0 +1,16 @@
+{
+  "agent_product": "RECORD_BEFORE_TRIAL",
+  "agent_version": "RECORD_BEFORE_TRIAL",
+  "model": "RECORD_BEFORE_TRIAL",
+  "settings": {"temperature": "RECORD_BEFORE_TRIAL", "tools": "RECORD_BEFORE_TRIAL"},
+  "prompt": "RECORD_BEFORE_TRIAL",
+  "fixture_revision": "8a9dcb0",
+  "policy_hash": "RECORD_POLICY_HASH",
+  "kernel_version": "RECORD_KERNEL_VERSION",
+  "commands": ["RECORD_COMMANDS_USED"],
+  "trials": {
+    "baseline": {"attempted": false, "outcome": "RECORD_RESULT"},
+    "dry_run": {"attempted": false, "outcome": "RECORD_RESULT"},
+    "enforce": {"attempted": false, "outcome": "RECORD_RESULT"}
+  }
+}
