@@ -90,8 +90,9 @@ SHA-256; the public API retains the first 64 bits for compact event fields.
 
 The Rust runtime currently exposes strict JSON decoding for the bounded compiler
 spec (`sentry_policy::compiler::load_policy_spec_json`), including unknown-field
-rejection. The v0 document-to-compiler adapter and full runtime activation path
-remain open work; the Python fixture validator is not treated as that adapter.
+rejection. The v0 document-to-compiler adapter is now implemented and covered
+by Rust tests; full runtime activation and kernel map wiring remain open. The
+Python fixture validator is not treated as the adapter.
 
 ## Dry-run verdicts
 
