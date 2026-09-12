@@ -37,6 +37,7 @@ pub struct ExecutionAttestation {
 pub enum AttestationError {
     InvalidSequence,
     IncompleteEvidence,
+    EnvironmentMismatch,
     IntegrityMismatch,
 }
 
@@ -82,6 +83,27 @@ impl ExecutionAttestation {
         }
         if &self.digest() != expected_digest {
             return Err(AttestationError::IntegrityMismatch);
+        }
+        Ok(())
+    }
+
+    /// Checks that the verifier observed the same host identity recorded by
+    /// the attestation.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EnvironmentMismatch` if any supplied identity differs.
+    pub fn verify_environment(
+        &self,
+        kernel_version: &str,
+        architecture: &str,
+        capability_fingerprint: &str,
+    ) -> Result<(), AttestationError> {
+        if self.kernel_version != kernel_version
+            || self.architecture != architecture
+            || self.capability_fingerprint != capability_fingerprint
+        {
+            return Err(AttestationError::EnvironmentMismatch);
         }
         Ok(())
     }
@@ -212,5 +234,18 @@ mod tests {
         let mut second = complete();
         second.policy_mode = "enforce|bpf".to_owned();
         assert_ne!(first.digest(), second.digest());
+    }
+
+    #[test]
+    fn environment_mismatch_is_rejected() {
+        let attestation = complete();
+        assert_eq!(
+            attestation.verify_environment("6.12.54", "aarch64", "caps-v1"),
+            Ok(())
+        );
+        assert_eq!(
+            attestation.verify_environment("6.12.55", "aarch64", "caps-v1"),
+            Err(AttestationError::EnvironmentMismatch)
+        );
     }
 }

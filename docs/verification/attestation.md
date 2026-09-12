@@ -12,3 +12,6 @@ same canonical field encoding exposed by the read-only `canonical_bytes()`
 method. Live collection from kernel events and signing
 by a trusted runtime are still required before this primitive can support the
 complete release attestation.
+
+`verify_environment()` separately compares the recorded kernel version,
+architecture, and capability fingerprint with the verifier's current host.
