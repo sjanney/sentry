@@ -15,3 +15,5 @@ complete release attestation.
 
 `verify_environment()` separately compares the recorded kernel version,
 architecture, and capability fingerprint with the verifier's current host.
+`verify_process_identity()` compares the root TGID and procfs start-time ticks,
+which detects PID reuse across a run.
