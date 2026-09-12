@@ -2,7 +2,7 @@
 
 `sentry-daemon::attestation::ExecutionAttestation` hashes a canonical,
 redacted set of policy, environment, process-tree, event, decision, workflow,
-and verifier fields. `verify` rejects event loss, partial coverage, unsupported
+and verifier fields, including the complete ordered event sequence. `verify` rejects event loss, partial coverage, unsupported
 guarantees, unavailable enforcement, failed verification, invalid ordering, or
 tampering with the expected digest.
 

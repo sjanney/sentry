@@ -19,6 +19,7 @@ pub struct ExecutionAttestation {
     pub process_tree_id: String,
     pub first_event_sequence: u64,
     pub last_event_sequence: u64,
+    pub event_sequences: Vec<u64>,
     pub event_loss_count: u64,
     pub filesystem_decision_count: u64,
     pub credential_class_decision_count: u64,
@@ -56,6 +57,15 @@ impl ExecutionAttestation {
         if self.last_event_sequence < self.first_event_sequence {
             return Err(AttestationError::InvalidSequence);
         }
+        if self.event_sequences.first().copied() != Some(self.first_event_sequence)
+            || self.event_sequences.last().copied() != Some(self.last_event_sequence)
+            || self
+                .event_sequences
+                .windows(2)
+                .any(|pair| pair[1] <= pair[0])
+        {
+            return Err(AttestationError::InvalidSequence);
+        }
         if self.event_loss_count != 0
             || self.partial_coverage
             || self.unsupported_guarantees
@@ -72,7 +82,7 @@ impl ExecutionAttestation {
 
     fn canonical_bytes(&self) -> Vec<u8> {
         format!(
-            "v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.policy_hash,
             self.policy_revision,
             self.policy_mode,
@@ -84,6 +94,11 @@ impl ExecutionAttestation {
             self.process_tree_id,
             self.first_event_sequence,
             self.last_event_sequence,
+            self.event_sequences
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
             self.event_loss_count,
             self.filesystem_decision_count,
             self.credential_class_decision_count,
@@ -117,6 +132,7 @@ mod tests {
             process_tree_id: "tree-1".to_owned(),
             first_event_sequence: 1,
             last_event_sequence: 4,
+            event_sequences: vec![1, 2, 3, 4],
             event_loss_count: 0,
             filesystem_decision_count: 1,
             credential_class_decision_count: 1,
@@ -156,6 +172,21 @@ mod tests {
         assert_eq!(
             attestation.verify(&attestation.digest()),
             Err(AttestationError::IncompleteEvidence)
+        );
+    }
+
+    #[test]
+    fn reordered_or_truncated_event_sequences_are_rejected() {
+        let mut attestation = complete();
+        attestation.event_sequences = vec![1, 3, 2, 4];
+        assert_eq!(
+            attestation.verify(&attestation.digest()),
+            Err(AttestationError::InvalidSequence)
+        );
+        attestation.event_sequences = vec![1, 2, 3];
+        assert_eq!(
+            attestation.verify(&attestation.digest()),
+            Err(AttestationError::InvalidSequence)
         );
     }
 }
