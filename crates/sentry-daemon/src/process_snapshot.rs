@@ -54,7 +54,13 @@ pub fn snapshot_process_tree(
     let mut processes = BTreeMap::from([(root_tgid, initial_root)]);
     let mut skipped_processes = 0;
     let entries = fs::read_dir(procfs_root).map_err(|_| SnapshotError::RootUnavailable)?;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let Ok(entry) = entry else {
+            // A concurrent process exit or procfs access failure means the
+            // result cannot describe a complete point-in-time tree.
+            skipped_processes += 1;
+            continue;
+        };
         let Ok(tgid) = entry.file_name().to_string_lossy().parse::<u32>() else {
             continue;
         };
