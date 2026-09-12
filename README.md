@@ -81,6 +81,12 @@ Build with `cargo build --release -p sentry-cli`; copy `target/release/sentry`
 to a directory in `PATH`. Remove that binary to uninstall. Today there is no
 installer, background service, persistent BPF pin, or configuration state.
 
+For a user-local install, `cargo install --path crates/sentry-cli --locked`
+places the `sentry` binary in Cargo's bin directory; remove it with
+`cargo uninstall sentry-cli`. The host-safe CLI walkthrough needs no elevated
+privileges. The disposable kernel probes require a privileged Docker container
+solely to load and detach test programs; they do not install persistent policy.
+
 The eventual primary path requires Linux capabilities sufficient to load the
 declared BPF programs and attach them to the target cgroup; the exact minimal
 capability set is a release-matrix item. The seccomp fallback requires only a
