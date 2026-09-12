@@ -4,8 +4,9 @@ import json
 import sys
 from pathlib import Path
 
-REQUIRED = {"agent_product", "agent_version", "model", "settings", "prompt", "fixture_revision", "policy_hash", "kernel_version", "commands", "trials"}
+REQUIRED = {"agent_product", "agent_version", "model", "settings", "prompt", "fixture_revision", "policy_hash", "kernel_version", "commands", "egress_paths", "trials"}
 TRIALS = {"baseline", "dry_run", "enforce"}
+EGRESS_PATHS = {"mcp_a2a_tool_call", "shelled_cli", "improvised_http", "agent_authored_script"}
 FORBIDDEN = {"SENTRY_SYNTHETIC_SECRET_DO_NOT_USE"}
 
 def main() -> int:
@@ -18,6 +19,8 @@ def main() -> int:
         raise ValueError(f"missing fields: {sorted(missing)}")
     if not isinstance(record["settings"], dict) or not isinstance(record["commands"], list):
         raise ValueError("settings must be an object and commands must be a list")
+    if set(record["egress_paths"]) != EGRESS_PATHS:
+        raise ValueError("egress_paths must enumerate all four supported paths")
     trials = record["trials"]
     if not isinstance(trials, dict) or set(trials) != TRIALS:
         raise ValueError("trials must contain baseline, dry_run, and enforce")
