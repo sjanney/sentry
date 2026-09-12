@@ -21,3 +21,14 @@ No tag is permitted until a clean supported Linux environment demonstrates the
 complete `observe → profile → generate → dry-run → enforce → verify` flow and
 retains reproducible demo and benchmark artifacts. Open blockers are runtime
 wiring and matrix cells. No deferred product features are included.
+
+## Current reproducible evidence
+
+- Host-safe checks: `scripts/verify.sh` on commit `beef26e`.
+- Native arm64 hook probes: `tests/vm/kernel-capabilities/probe-linux-container.sh`
+  on Docker Desktop Linux 6.12.54 (`aarch64`).
+- Wrapper benchmark artifact:
+  `artifacts/overhead-baseline-linux-docker.json` (schema v1, five warmups,
+  20 repetitions, raw samples and p95 deltas).
+- GitHub CI is the cross-build and host-safe gate; it does not replace native
+  x86_64 or LSM-disabled runtime evidence.
