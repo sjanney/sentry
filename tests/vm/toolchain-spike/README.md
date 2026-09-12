@@ -8,6 +8,9 @@ tracepoint attachment through each userspace API, trigger a fresh `exec`, and
 consume one fixed-size event. They do not read files, make network connections,
 or keep links after the container exits.
 
+The probe prints both `kernel` and `arch` so each result is attributable to an
+explicit Linux architecture rather than inferred from the calling host.
+
 Run the native Linux architecture check from the repository root:
 
 ```sh

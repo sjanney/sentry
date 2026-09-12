@@ -15,6 +15,7 @@ docker run --rm --privileged \
     mount -t securityfs securityfs /sys/kernel/security 2>/dev/null || true
     mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
     printf "kernel: "; uname -r
+    printf "arch: "; uname -m
     test -r /sys/kernel/btf/vmlinux && echo "BTF: present"
     test -e /sys/fs/cgroup/cgroup.controllers && echo "cgroup: v2"
     printf "LSMs: "; cat /sys/kernel/security/lsm
