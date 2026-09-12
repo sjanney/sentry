@@ -614,6 +614,32 @@ mod tests {
     }
 
     #[test]
+    fn exec_preserves_taint_for_the_next_egress_decision() {
+        let process = key(42, 4200);
+        let mut tracker = ProcessTracker::new(1);
+        tracker.register_launch(process, 9).unwrap();
+        tracker
+            .taint(
+                process,
+                TaintMask {
+                    secret: false,
+                    untrusted_input: true,
+                },
+            )
+            .unwrap();
+
+        tracker.exec(process).unwrap();
+
+        assert_eq!(
+            tracker.taint_at_egress(process),
+            Some(TaintMask {
+                secret: false,
+                untrusted_input: true,
+            })
+        );
+    }
+
+    #[test]
     fn credential_catalog_redacts_paths_and_keeps_identity_across_aliases_and_renames() {
         use std::{fs, os::unix::fs::symlink};
 
