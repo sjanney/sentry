@@ -24,3 +24,6 @@ an end-to-end enforcement audit claim.
 files. It accepts a log path and reports sequence or hash corruption without
 using the Rust parser. For a rotated file, pass the predecessor sequence and
 64-character SHA-256 checkpoint hash as the second and third arguments.
+
+The Rust CLI uses named flags for the same contract:
+`sentry audit verify LOG --checkpoint-sequence N --checkpoint-hash HEX`.
