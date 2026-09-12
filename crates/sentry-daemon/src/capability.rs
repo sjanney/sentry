@@ -35,7 +35,7 @@ impl KernelPreflight {
     #[must_use]
     pub fn available_capabilities(&self) -> BTreeSet<KernelCapability> {
         let mut capabilities = BTreeSet::new();
-        if self.bpf_lsm_active {
+        if self.btf_readable && self.bpf_lsm_active {
             capabilities.insert(KernelCapability::BpfLsm);
         }
         if self.cgroup_v2_available {
@@ -104,6 +104,19 @@ mod tests {
         assert_eq!(
             preflight.available_capabilities(),
             BTreeSet::from([KernelCapability::BpfLsm])
+        );
+    }
+
+    #[test]
+    fn bpf_lsm_without_btf_is_not_projected_as_loadable() {
+        let preflight = KernelPreflight {
+            btf_readable: false,
+            bpf_lsm_active: true,
+            cgroup_v2_available: true,
+        };
+        assert_eq!(
+            preflight.available_capabilities(),
+            BTreeSet::from([KernelCapability::CgroupV2])
         );
     }
 }
