@@ -251,7 +251,10 @@ pub fn compile_kernel_policy(
         if domain.is_empty() {
             return Err(PolicyCompileError::EmptyDomain);
         }
-        if domain.bytes().any(|byte| byte.is_ascii_control()) {
+        if domain
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'*')
+        {
             return Err(PolicyCompileError::InvalidDomain {
                 domain: domain.clone(),
             });
@@ -564,6 +567,20 @@ mod tests {
             compile_kernel_policy(&spec, &capabilities, limits()),
             Err(PolicyCompileError::InvalidDomain {
                 domain: "api\u{0}example.test".to_owned()
+            })
+        );
+        spec.allowed_domains = BTreeSet::from(["*.example.test".to_owned()]);
+        assert_eq!(
+            compile_kernel_policy(&spec, &capabilities, limits()),
+            Err(PolicyCompileError::InvalidDomain {
+                domain: "*.example.test".to_owned()
+            })
+        );
+        spec.allowed_domains = BTreeSet::from(["api.example.test ".to_owned()]);
+        assert_eq!(
+            compile_kernel_policy(&spec, &capabilities, limits()),
+            Err(PolicyCompileError::InvalidDomain {
+                domain: "api.example.test ".to_owned()
             })
         );
         spec.allowed_domains.clear();
