@@ -313,6 +313,11 @@ pub fn compile_kernel_policy(
 
 impl CompiledKernelPolicy {
     #[must_use]
+    pub const fn policy_version(&self) -> u64 {
+        self.policy_version
+    }
+
+    #[must_use]
     pub fn decide_egress(&self, taint: TaintMask, destination: Destination<'_>) -> EgressDecision {
         let allowed_domains: Vec<_> = self.domain_slots.iter().map(String::as_str).collect();
         let allowed_cidrs: Vec<_> = self.cidr_slots.iter().map(String::as_str).collect();

@@ -226,4 +226,34 @@ mod tests {
             )))
         );
     }
+
+    #[test]
+    fn compile_policy_returns_bounded_policy_when_capabilities_are_observed() {
+        let preflight = KernelPreflight {
+            btf_readable: true,
+            bpf_lsm_active: true,
+            cgroup_v2_available: true,
+        };
+        let policy = PolicySpec {
+            schema_version: 1,
+            policy_version: 1,
+            mode: sentry_policy::compiler::PolicyMode::Enforce,
+            default_deny: true,
+            deny_untrusted_egress: false,
+            allowed_domains: BTreeSet::new(),
+            allowed_cidrs: BTreeSet::new(),
+            required_capabilities: BTreeSet::from([KernelCapability::BpfLsm]),
+        };
+        let compiled = preflight
+            .compile_policy(
+                &policy,
+                KernelPolicyLimits {
+                    max_domains: 4,
+                    max_cidrs: 4,
+                    max_serialized_bytes: 1024,
+                },
+            )
+            .expect("observed capabilities should permit bounded compilation");
+        assert_eq!(compiled.policy_version(), 1);
+    }
 }
