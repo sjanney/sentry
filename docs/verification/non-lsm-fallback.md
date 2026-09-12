@@ -14,6 +14,10 @@ process. This subset is intentionally less capable than LSM plus cgroup
 enforcement; it denies its declared violation rather than claiming equivalent
 coverage.
 
+The Rust policy layer exposes `validate_seccomp_fallback` as the pre-launch
+gate. It accepts only an enforcing, default-deny policy with no destination
+rules or required kernel capabilities; callers must fail closed on every error.
+
 The current kernel evidence runs on an LSM-enabled host because its purpose is
 to demonstrate the fallback’s independence from LSM hooks. A release gate still
 requires the same probe on a declared host with BPF LSM disabled before the

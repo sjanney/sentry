@@ -75,6 +75,45 @@ pub enum ActivationError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FallbackPolicyError {
+    UnsupportedMode,
+    NonDenyDefault,
+    DomainRulesUnsupported,
+    CidrRulesUnsupported,
+    CapabilityRequired { capability: KernelCapability },
+}
+
+/// Validates the deliberately small policy subset supported by the seccomp
+/// fallback when BPF-LSM and cgroup enforcement are unavailable.
+///
+/// The fallback can enforce launch-time socket creation denial only. It must
+/// reject policies containing controls it cannot represent before starting the
+/// workload, rather than claiming equivalent coverage.
+///
+/// # Errors
+///
+/// Returns a typed error when the policy requests a mode, destination rule,
+/// or kernel capability outside the fallback subset.
+pub fn validate_seccomp_fallback(policy: &PolicySpec) -> Result<(), FallbackPolicyError> {
+    if policy.mode != PolicyMode::Enforce {
+        return Err(FallbackPolicyError::UnsupportedMode);
+    }
+    if !policy.default_deny {
+        return Err(FallbackPolicyError::NonDenyDefault);
+    }
+    if !policy.allowed_domains.is_empty() {
+        return Err(FallbackPolicyError::DomainRulesUnsupported);
+    }
+    if !policy.allowed_cidrs.is_empty() {
+        return Err(FallbackPolicyError::CidrRulesUnsupported);
+    }
+    if let Some(capability) = policy.required_capabilities.iter().next().copied() {
+        return Err(FallbackPolicyError::CapabilityRequired { capability });
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DryRunVerdict {
     pub decision: EgressDecision,
     pub would_deny: bool,
@@ -520,5 +559,28 @@ mod tests {
         assert_eq!(dry_run.rule_id, Some(RuleId::SecretTaintDeny));
         assert_eq!(dry_run.policy_hash, compiled.policy_hash);
         assert!(dry_run.explanation.contains("credential"));
+    }
+
+    #[test]
+    fn seccomp_fallback_rejects_unrepresentable_controls() {
+        let mut spec = policy();
+        assert_eq!(
+            validate_seccomp_fallback(&spec),
+            Err(FallbackPolicyError::DomainRulesUnsupported)
+        );
+        spec.allowed_domains.clear();
+        spec.allowed_cidrs.insert("198.51.100.0/24".to_owned());
+        assert_eq!(
+            validate_seccomp_fallback(&spec),
+            Err(FallbackPolicyError::CidrRulesUnsupported)
+        );
+        spec.allowed_cidrs.clear();
+        spec.required_capabilities.clear();
+        assert_eq!(validate_seccomp_fallback(&spec), Ok(()));
+        spec.mode = PolicyMode::DryRun;
+        assert_eq!(
+            validate_seccomp_fallback(&spec),
+            Err(FallbackPolicyError::UnsupportedMode)
+        );
     }
 }
