@@ -58,6 +58,12 @@ if [[ $(uname -s) == Linux ]]; then
   cargo run -q -p sentry-cli -- observe --audit-log "$audit_log" -- sh -c 'exit 0'
   audit_result=$(cargo run -q -p sentry-cli -- audit verify "$audit_log")
   grep -Fq 'verified audit sequence 2' <<<"$audit_result"
+  checkpoint_log="$workdir/rotated-audit.log"
+  : > "$checkpoint_log"
+  checkpoint_result=$(cargo run -q -p sentry-cli -- audit verify "$checkpoint_log" \
+    --checkpoint-sequence 7 \
+    --checkpoint-hash 0000000000000000000000000000000000000000000000000000000000000000)
+  grep -Fq 'verified audit sequence 7' <<<"$checkpoint_result"
   if cargo run -q -p sentry-cli -- attach 1 unexpected; then
     echo 'attach accepted unexpected arguments' >&2
     exit 1
