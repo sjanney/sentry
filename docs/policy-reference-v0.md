@@ -34,7 +34,10 @@ explicit CIDR is a separate capability rule. Direct IP, an unobserved resolver
 answer, an expired answer, or a DNS answer from another execution domain is
 `unknown`; it is denied by the v0 default action in enforce mode and recorded
 as a would-deny result in dry-run mode. A secret taint deny takes precedence
-over every destination allow; an untrusted deny follows it.
+over every destination allow; an untrusted deny follows it. An empty
+destination allowlist is also deny-by-default. CIDRs must use a valid IPv4 or
+IPv6 address and prefix length; malformed entries are rejected during
+compilation rather than treated as a permissive unknown.
 
 ## Kernel requirements and unsupported cases
 
