@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
+use serde::Deserialize;
 use std::{collections::BTreeSet, net::IpAddr, sync::RwLock};
 
 use crate::{Destination, EgressDecision, EgressPolicy, TaintMask, decide_egress};
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+#[serde(rename_all = "snake_case")]
 pub enum KernelCapability {
     BpfLsm,
     CgroupV2,
     DnsObservation,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum PolicyMode {
     DryRun,
     Enforce,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PolicySpec {
     pub schema_version: u32,
     pub policy_version: u64,
@@ -26,6 +30,16 @@ pub struct PolicySpec {
     pub allowed_domains: BTreeSet<String>,
     pub allowed_cidrs: BTreeSet<String>,
     pub required_capabilities: BTreeSet<KernelCapability>,
+}
+
+/// Strictly decodes the bounded compiler input used by the runtime boundary.
+///
+/// # Errors
+///
+/// Returns a JSON error for malformed input, unknown fields, or invalid enum
+/// values. Semantic and capability checks still run in `compile_kernel_policy`.
+pub fn load_policy_spec_json(input: &str) -> Result<PolicySpec, serde_json::Error> {
+    serde_json::from_str(input)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -582,5 +596,22 @@ mod tests {
             validate_seccomp_fallback(&spec),
             Err(FallbackPolicyError::UnsupportedMode)
         );
+    }
+
+    #[test]
+    fn json_loader_rejects_unknown_fields_and_decodes_strictly() {
+        let spec = load_policy_spec_json(
+            r#"{"schema_version":1,"policy_version":4,"mode":"enforce","default_deny":true,"deny_untrusted_egress":false,"allowed_domains":[],"allowed_cidrs":[],"required_capabilities":["cgroup_v2"]}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.mode, PolicyMode::Enforce);
+        assert!(
+            spec.required_capabilities
+                .contains(&KernelCapability::CgroupV2)
+        );
+        assert!(load_policy_spec_json(
+            r#"{"schema_version":1,"policy_version":4,"mode":"enforce","default_deny":true,"deny_untrusted_egress":false,"allowed_domains":[],"allowed_cidrs":[],"required_capabilities":[],"unexpected":true}"#,
+        )
+        .is_err());
     }
 }

@@ -85,6 +85,11 @@ validation failure leaves the previous policy in place. The current activation
 boundary is userspace state; connecting those bounded slots to eBPF maps is
 still required before an enforce-mode kernel claim can be made.
 
+The Rust runtime currently exposes strict JSON decoding for the bounded compiler
+spec (`sentry_policy::compiler::load_policy_spec_json`), including unknown-field
+rejection. The v0 document-to-compiler adapter and full runtime activation path
+remain open work; the Python fixture validator is not treated as that adapter.
+
 ## Dry-run verdicts
 
 Dry-run calls the same compiled egress decision as enforce mode and records the
