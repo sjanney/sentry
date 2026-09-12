@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Redacted, independently verifiable execution-attestation envelope.
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 // These independent flags are serialized evidence dimensions; collapsing
 // them would hide which specific completeness condition failed.
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionAttestation {
     pub policy_hash: u64,
     pub policy_revision: u64,
@@ -55,6 +57,24 @@ impl ExecutionAttestation {
     #[must_use]
     pub fn canonical_bytes(&self) -> Vec<u8> {
         self.canonical_encoding()
+    }
+
+    /// Serializes the redacted envelope for independent verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JSON serialization error if encoding fails.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Strictly decodes a redacted envelope from JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JSON error for malformed input or unknown fields.
+    pub fn from_json(input: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(input)
     }
 
     /// Verifies that the attestation is complete enough to claim protection.
@@ -321,5 +341,17 @@ mod tests {
             attestation.verify(&attestation.digest()),
             Err(AttestationError::SensitiveField)
         );
+    }
+
+    #[test]
+    fn json_round_trip_is_strict_and_preserves_digest() {
+        let attestation = complete();
+        let json = attestation.to_json().unwrap();
+        let decoded = ExecutionAttestation::from_json(&json).unwrap();
+        assert_eq!(decoded, attestation);
+        assert_eq!(decoded.digest(), attestation.digest());
+        let mut tampered = json.trim_end_matches('}').to_owned();
+        tampered.push_str(",\"unexpected\":true}");
+        assert!(ExecutionAttestation::from_json(&tampered).is_err());
     }
 }
