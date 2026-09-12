@@ -51,13 +51,13 @@ pub enum PolicyCompileError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompiledKernelPolicy {
-    pub policy_version: u64,
-    pub policy_hash: u64,
-    pub mode: PolicyMode,
-    pub default_deny: bool,
+    policy_version: u64,
+    policy_hash: u64,
+    mode: PolicyMode,
+    default_deny: bool,
     deny_untrusted_egress: bool,
-    pub domain_slots: Vec<String>,
-    pub cidr_slots: Vec<String>,
+    domain_slots: Vec<String>,
+    cidr_slots: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +65,13 @@ pub enum RuleId {
     SecretTaintDeny,
     UntrustedTaintDeny,
     UnattributedDestinationDeny,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActivationError {
+    Poisoned,
+    VersionRegression,
+    VersionConflict,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -226,10 +233,26 @@ impl PolicyActivation {
         }
     }
 
-    pub fn activate(&self, policy: CompiledKernelPolicy) {
-        if let Ok(mut active) = self.active.write() {
-            *active = Some(policy);
+    /// Atomically installs a validated policy without version rollback.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock is poisoned, the version regresses, or a
+    /// same-version policy has a different identity hash.
+    pub fn activate(&self, policy: CompiledKernelPolicy) -> Result<(), ActivationError> {
+        let mut active = self.active.write().map_err(|_| ActivationError::Poisoned)?;
+        if let Some(current) = active.as_ref() {
+            if policy.policy_version < current.policy_version {
+                return Err(ActivationError::VersionRegression);
+            }
+            if policy.policy_version == current.policy_version
+                && policy.policy_hash != current.policy_hash
+            {
+                return Err(ActivationError::VersionConflict);
+            }
         }
+        *active = Some(policy);
+        Ok(())
     }
 
     #[must_use]
@@ -448,8 +471,31 @@ mod tests {
         assert_eq!(activation.active(), None);
         let spec = policy();
         let compiled = compile_kernel_policy(&spec, &spec.required_capabilities, limits()).unwrap();
-        activation.activate(compiled.clone());
+        activation.activate(compiled.clone()).unwrap();
         assert_eq!(activation.active(), Some(compiled));
+    }
+
+    #[test]
+    fn activation_rejects_downgrades_and_same_version_conflicts() {
+        let activation = PolicyActivation::new();
+        let capabilities = policy().required_capabilities.clone();
+        activation
+            .activate(compile_kernel_policy(&policy(), &capabilities, limits()).unwrap())
+            .unwrap();
+        let mut older = policy();
+        older.policy_version = 3;
+        let older = compile_kernel_policy(&older, &capabilities, limits()).unwrap();
+        assert_eq!(
+            activation.activate(older),
+            Err(ActivationError::VersionRegression)
+        );
+        let mut conflict = policy();
+        conflict.deny_untrusted_egress = true;
+        let conflict = compile_kernel_policy(&conflict, &capabilities, limits()).unwrap();
+        assert_eq!(
+            activation.activate(conflict),
+            Err(ActivationError::VersionConflict)
+        );
     }
 
     #[test]
