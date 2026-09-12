@@ -102,6 +102,7 @@ that redaction boundary.
 See the [security matrix](docs/verification/security-matrix.md),
 [failure lifecycle](docs/verification/failure-lifecycle.md),
 [procurement requirements matrix](docs/verification/procurement-requirements-matrix.md),
+[non-TEE Linux profile](docs/verification/non-tee-linux-profile.md),
 [attestation contract](docs/verification/attestation.md), and
 [real-agent protocol](docs/verification/real-agent-exfiltration-protocol.md)
 for the remaining release gates.
