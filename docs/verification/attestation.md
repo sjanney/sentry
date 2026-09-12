@@ -8,6 +8,7 @@ tampering with the expected digest.
 
 The envelope stores identifiers and counts only; it has no credential paths,
 secret contents, tokens, or payloads. It is independently verifiable with the
-same canonical field encoding. Live collection from kernel events and signing
+same canonical field encoding exposed by the read-only `canonical_bytes()`
+method. Live collection from kernel events and signing
 by a trusted runtime are still required before this primitive can support the
 complete release attestation.

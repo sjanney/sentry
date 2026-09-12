@@ -47,6 +47,12 @@ impl ExecutionAttestation {
         Sha256::digest(self.canonical_bytes()).into()
     }
 
+    /// Returns the canonical, redacted bytes covered by `digest`.
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        self.canonical_encoding()
+    }
+
     /// Verifies that the attestation is complete enough to claim protection.
     ///
     /// # Errors
@@ -80,7 +86,7 @@ impl ExecutionAttestation {
         Ok(())
     }
 
-    fn canonical_bytes(&self) -> Vec<u8> {
+    fn canonical_encoding(&self) -> Vec<u8> {
         format!(
             "v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.policy_hash,
