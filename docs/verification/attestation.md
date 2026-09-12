@@ -17,3 +17,5 @@ complete release attestation.
 architecture, and capability fingerprint with the verifier's current host.
 `verify_process_identity()` compares the root TGID and procfs start-time ticks,
 which detects PID reuse across a run.
+`verify()` also applies `validate_redaction()` and rejects path-like or control
+character values in identifier fields.
