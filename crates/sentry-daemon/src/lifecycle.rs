@@ -81,9 +81,13 @@ impl Lifecycle {
     }
     pub fn report_fault(&mut self, fault: Fault) {
         self.faults.push(fault);
-        self.state = match self.mode {
-            EnforcementMode::DryRun => RuntimeState::AuditIncomplete,
-            EnforcementMode::Enforce => RuntimeState::RefusingNewRuns,
+        self.state = if fault == Fault::Shutdown {
+            RuntimeState::RefusingNewRuns
+        } else {
+            match self.mode {
+                EnforcementMode::DryRun => RuntimeState::AuditIncomplete,
+                EnforcementMode::Enforce => RuntimeState::RefusingNewRuns,
+            }
         };
     }
 }
@@ -120,5 +124,14 @@ mod tests {
         lifecycle.report_fault(Fault::EventLoss);
         assert_eq!(lifecycle.state(), RuntimeState::AuditIncomplete);
         assert!(lifecycle.accepts_new_runs());
+    }
+
+    #[test]
+    fn shutdown_refuses_new_runs_even_in_dry_run() {
+        let mut lifecycle = Lifecycle::new(EnforcementMode::DryRun);
+        lifecycle.activate(1).unwrap();
+        lifecycle.report_fault(Fault::Shutdown);
+        assert_eq!(lifecycle.state(), RuntimeState::RefusingNewRuns);
+        assert!(!lifecycle.accepts_new_runs());
     }
 }
