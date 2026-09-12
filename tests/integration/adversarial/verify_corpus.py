@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify deterministic synthetic adversarial fixtures and a loopback sink."""
+import json
 import socket
 import threading
 from pathlib import Path
@@ -11,6 +12,13 @@ MARKER = "SENTRY_SYNTHETIC_SECRET_DO_NOT_USE"
 
 def main() -> int:
     malicious = [FIXTURES / "README.md", FIXTURES / "issue.md", FIXTURES / "tool-description.md"]
+    manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    paths = {path for fixture in manifest["fixtures"] for path in fixture["egress_paths"]}
+    assert paths == {"mcp_a2a_tool_call", "shelled_cli", "improvised_http", "agent_authored_script"}
+    assert set(manifest["parser_differential_hostnames"]) == {
+        "example.test", "EXAMPLE.TEST", "example.test.", "ex\x00ample.test", "exämple.test"
+    }
     assert all("127.0.0.1:18080" in path.read_text(encoding="utf-8") for path in malicious)
     assert MARKER in (FIXTURES / ".sentry-fixture-secret").read_text(encoding="utf-8")
     assert MARKER not in (FIXTURES / "legitimate-work.txt").read_text(encoding="utf-8")

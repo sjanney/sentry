@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {"name": "mcp-tool-call", "egress_paths": ["mcp_a2a_tool_call"]},
+    {"name": "shelled-cli", "egress_paths": ["shelled_cli"]},
+    {"name": "improvised-http", "egress_paths": ["improvised_http"]},
+    {"name": "agent-authored-script", "egress_paths": ["agent_authored_script"]},
+    {"name": "combined-exfiltration", "egress_paths": ["mcp_a2a_tool_call", "shelled_cli", "improvised_http", "agent_authored_script"]}
+  ],
+  "parser_differential_hostnames": ["example.test", "EXAMPLE.TEST", "example.test.", "ex\u0000ample.test", "ex\u00e4mple.test"]
+}
