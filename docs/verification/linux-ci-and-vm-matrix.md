@@ -47,7 +47,7 @@ This executes two independent privileged integration checks:
 
 The recorded local evidence is Linux `6.12.54-linuxkit` on arm64 with BTF,
 cgroup v2, and `capability,bpf` active. Both integration commands passed on
-2026-09-11.
+2026-09-12.
 
 ## Real x86_64 runtime requirement
 
