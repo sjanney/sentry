@@ -14,7 +14,7 @@ use sentry_policy::{
 };
 use std::collections::BTreeSet;
 
-const USAGE: &str = "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run (--allow-domain DOMAIN --domain DOMAIN | --allow-cidr CIDR --ip IP) [--secret] | attach <pid> | capabilities | audit verify <path>";
+const USAGE: &str = "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run (--allow-domain DOMAIN --domain DOMAIN | --allow-cidr CIDR --ip IP) [--secret] | attach <pid> | capabilities | audit verify <path> [--checkpoint-sequence N --checkpoint-hash HEX]";
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -72,24 +72,9 @@ fn main() {
                 CommandOutcome::Exited(0)
             })
             .map_err(|error| render_error(&error)),
-        Some("audit") if arguments.get(1).map(String::as_str) == Some("verify") => arguments
-            .get(2)
-            .ok_or_else(|| "audit verify requires a log path".to_owned())
-            .and_then(|path| {
-                audit::verify(std::path::Path::new(path), None)
-                    .map_err(|error| render_audit_error(&error))
-            })
-            .map(|checkpoint| {
-                match checkpoint {
-                    Some(checkpoint) => println!(
-                        "verified audit sequence {} hash {}",
-                        checkpoint.sequence,
-                        hex(&checkpoint.hash)
-                    ),
-                    None => println!("verified empty audit log"),
-                }
-                CommandOutcome::Exited(0)
-            }),
+        Some("audit") if arguments.get(1).map(String::as_str) == Some("verify") => {
+            verify_audit(&arguments[2..])
+        }
         Some("dry-run") => dry_run(&arguments[1..]),
         Some("generate") => generate_candidate(&arguments[1..]),
         Some("--help" | "help") => {
@@ -110,6 +95,60 @@ fn main() {
             process::exit(2);
         }
     }
+}
+
+fn verify_audit(arguments: &[String]) -> Result<CommandOutcome, String> {
+    let path = arguments
+        .first()
+        .ok_or_else(|| "audit verify requires a log path".to_owned())?;
+    let mut sequence = None;
+    let mut hash = None;
+    let mut index = 1;
+    while index < arguments.len() {
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| "audit verify checkpoint options require a value".to_owned())?;
+        match arguments[index].as_str() {
+            "--checkpoint-sequence" => {
+                sequence = Some(value.parse::<u64>().map_err(|_| {
+                    "checkpoint sequence must be a non-negative integer".to_owned()
+                })?);
+            }
+            "--checkpoint-hash" => {
+                hash = Some(parse_hash(value)?);
+            }
+            _ => return Err("unknown audit verify option".to_owned()),
+        }
+        index += 2;
+    }
+    let checkpoint = match (sequence, hash) {
+        (None, None) => None,
+        (Some(sequence), Some(hash)) => Some(audit::AuditCheckpoint { sequence, hash }),
+        _ => return Err("checkpoint sequence and hash must be provided together".to_owned()),
+    };
+    let verified = audit::verify(std::path::Path::new(path), checkpoint.as_ref())
+        .map_err(|error| render_audit_error(&error))?;
+    match verified {
+        Some(checkpoint) => println!(
+            "verified audit sequence {} hash {}",
+            checkpoint.sequence,
+            hex(&checkpoint.hash)
+        ),
+        None => println!("verified empty audit log"),
+    }
+    Ok(CommandOutcome::Exited(0))
+}
+
+fn parse_hash(value: &str) -> Result<[u8; 32], String> {
+    if value.len() != 64 {
+        return Err("checkpoint hash must contain exactly 64 hex characters".to_owned());
+    }
+    let mut hash = [0; 32];
+    for (index, byte) in hash.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+            .map_err(|_| "checkpoint hash must contain only hex characters".to_owned())?;
+    }
+    Ok(hash)
 }
 
 fn attach_command(arguments: &[String]) -> Result<CommandOutcome, String> {

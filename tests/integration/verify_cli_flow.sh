@@ -39,6 +39,16 @@ if cargo run -q -p sentry-cli -- dry-run --allow-cidr 198.51.100.0/24 --ip inval
   echo 'CIDR dry-run accepted an invalid --ip' >&2
   exit 1
 fi
+if cargo run -q -p sentry-cli -- audit verify /tmp/sentry-missing-audit \
+  --checkpoint-sequence 1; then
+  echo 'audit verify accepted an incomplete checkpoint' >&2
+  exit 1
+fi
+if cargo run -q -p sentry-cli -- audit verify /tmp/sentry-missing-audit \
+  --checkpoint-sequence 1 --checkpoint-hash invalid; then
+  echo 'audit verify accepted a malformed checkpoint hash' >&2
+  exit 1
+fi
 
 if [[ $(uname -s) == Linux ]]; then
   capabilities=$(cargo run -q -p sentry-cli -- capabilities)
