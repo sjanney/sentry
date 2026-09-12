@@ -19,7 +19,9 @@ impl KernelPreflight {
         let btf_readable = fs::metadata(root.join("sys/kernel/btf/vmlinux"))
             .map(|metadata| metadata.is_file())
             .unwrap_or(false);
-        let cgroup_v2_available = root.join("sys/fs/cgroup/cgroup.controllers").exists();
+        let cgroup_v2_available = fs::metadata(root.join("sys/fs/cgroup/cgroup.controllers"))
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false);
         let bpf_lsm_active = fs::read_to_string(root.join("sys/kernel/security/lsm"))
             .map(|active| active.split(',').any(|name| name.trim() == "bpf"))
             .unwrap_or(false);
@@ -127,6 +129,14 @@ mod tests {
         let root = fixture("btf-directory");
         fs::create_dir_all(root.join("sys/kernel/btf/vmlinux")).unwrap();
         assert!(!KernelPreflight::inspect(&root).btf_readable);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cgroup_controller_directory_is_not_treated_as_cgroup_v2() {
+        let root = fixture("cgroup-directory");
+        fs::create_dir_all(root.join("sys/fs/cgroup/cgroup.controllers")).unwrap();
+        assert!(!KernelPreflight::inspect(&root).cgroup_v2_available);
         fs::remove_dir_all(root).unwrap();
     }
 }
