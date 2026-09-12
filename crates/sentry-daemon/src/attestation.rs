@@ -73,7 +73,7 @@ impl ExecutionAttestation {
             || self
                 .event_sequences
                 .windows(2)
-                .any(|pair| pair[1] <= pair[0])
+                .any(|pair| pair[1] != pair[0].saturating_add(1))
         {
             return Err(AttestationError::InvalidSequence);
         }
@@ -276,6 +276,11 @@ mod tests {
             Err(AttestationError::InvalidSequence)
         );
         attestation.event_sequences = vec![1, 2, 3];
+        assert_eq!(
+            attestation.verify(&attestation.digest()),
+            Err(AttestationError::InvalidSequence)
+        );
+        attestation.event_sequences = vec![1, 3, 4];
         assert_eq!(
             attestation.verify(&attestation.digest()),
             Err(AttestationError::InvalidSequence)
