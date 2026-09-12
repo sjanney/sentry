@@ -271,10 +271,28 @@ pub fn merge_profile(
 /// Renders a deterministic, review-only policy candidate from trusted profile data.
 #[must_use]
 pub fn render_policy_candidate(profile: &BehavioralProfile) -> String {
+    render_policy_candidate_with_context(profile, "unknown", "unknown", "dry_run")
+}
+
+/// Renders a review-only candidate with the runtime context used to produce it.
+#[must_use]
+pub fn render_policy_candidate_with_context(
+    profile: &BehavioralProfile,
+    kernel_version: &str,
+    architecture: &str,
+    enforcement_mode: &str,
+) -> String {
     let mut output = String::from(
         "# Sentry policy candidate v0\n# Review required: this file is not active policy.\n\
-         schema_version = 1\nmode = \"dry_run\"\ndefault_action = \"deny\"\nactivation = false\n\n",
+         schema_version = 1\nmode = \"dry_run\"\ndefault_action = \"deny\"\nactivation = false\n",
     );
+    output.push_str("tested_kernel = \"");
+    output.push_str(kernel_version);
+    output.push_str("\"\ntested_architecture = \"");
+    output.push_str(architecture);
+    output.push_str("\"\ntested_enforcement_mode = \"");
+    output.push_str(enforcement_mode);
+    output.push_str("\"\n\n");
     append_candidate_section(
         &mut output,
         "workspace paths",
@@ -659,5 +677,28 @@ mod tests {
         assert!(candidate.contains("untrusted run excluded: attacker"));
         assert!(!candidate.contains("attacker.example.test"));
         assert!(!candidate.contains("SshKey # observed"));
+    }
+
+    #[test]
+    fn contextual_candidate_records_runtime_test_dimensions() {
+        let profile = merge_profile([observation(
+            "run-1",
+            RunCompleteness::Complete,
+            ObservationTrust::Trusted,
+            &[],
+            &[],
+            &[],
+        )])
+        .unwrap();
+        let candidate = render_policy_candidate_with_context(
+            &profile,
+            "6.12.54-linuxkit",
+            "aarch64",
+            "dry_run",
+        );
+        assert!(candidate.contains("tested_kernel = \"6.12.54-linuxkit\""));
+        assert!(candidate.contains("tested_architecture = \"aarch64\""));
+        assert!(candidate.contains("tested_enforcement_mode = \"dry_run\""));
+        assert!(candidate.contains("activation = false"));
     }
 }
