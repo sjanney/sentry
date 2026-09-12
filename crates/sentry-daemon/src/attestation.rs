@@ -40,6 +40,7 @@ pub enum AttestationError {
     InvalidSequence,
     IncompleteEvidence,
     EnvironmentMismatch,
+    SensitiveField,
     IntegrityMismatch,
 }
 
@@ -63,6 +64,7 @@ impl ExecutionAttestation {
     /// Returns an error when event ordering is invalid, evidence is incomplete,
     /// or the supplied digest does not match the canonical envelope.
     pub fn verify(&self, expected_digest: &[u8; 32]) -> Result<(), AttestationError> {
+        self.validate_redaction()?;
         if self.last_event_sequence < self.first_event_sequence {
             return Err(AttestationError::InvalidSequence);
         }
@@ -85,6 +87,35 @@ impl ExecutionAttestation {
         }
         if &self.digest() != expected_digest {
             return Err(AttestationError::IntegrityMismatch);
+        }
+        Ok(())
+    }
+
+    /// Rejects values that look like paths or multiline payloads in fields
+    /// intended to contain identifiers and redacted summaries.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SensitiveField` when a field contains a path separator or
+    /// control character.
+    pub fn validate_redaction(&self) -> Result<(), AttestationError> {
+        let values = [
+            &self.policy_mode,
+            &self.enforcement_path,
+            &self.kernel_version,
+            &self.architecture,
+            &self.capability_fingerprint,
+            &self.execution_domain_id,
+            &self.process_tree_id,
+            &self.workflow_result,
+            &self.verifier_version,
+        ];
+        if values.iter().any(|value| {
+            value
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || byte == b'/' || byte == b'\\')
+        }) {
+            return Err(AttestationError::SensitiveField);
         }
         Ok(())
     }
@@ -274,6 +305,16 @@ mod tests {
         assert_eq!(
             attestation.verify_process_identity(100, 12346),
             Err(AttestationError::EnvironmentMismatch)
+        );
+    }
+
+    #[test]
+    fn path_like_redacted_values_are_rejected() {
+        let mut attestation = complete();
+        attestation.process_tree_id = "/proc/100".to_owned();
+        assert_eq!(
+            attestation.verify(&attestation.digest()),
+            Err(AttestationError::SensitiveField)
         );
     }
 }
