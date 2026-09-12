@@ -17,6 +17,9 @@ Run the native Linux architecture check from the repository root:
 bash tests/vm/toolchain-spike/run-linux-container-probe.sh
 ```
 
+Set `SENTRY_EXPECT_ARCH` (for example, `SENTRY_EXPECT_ARCH=aarch64`) when a
+matrix job must fail closed if Docker selects a different kernel architecture.
+
 The runner uses `rust:1.92-bookworm` so the Aya check satisfies Aya 0.14's
 minimum supported Rust version. It installs only the BPF compiler and loader
 packages needed inside its disposable container.

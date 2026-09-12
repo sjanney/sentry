@@ -2,7 +2,7 @@
 # Runs a disposable Linux toolchain probe on the native kernel architecture.
 set -euo pipefail
 
-docker run --rm --privileged \
+docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
   --mount "type=bind,source=$(pwd),target=/work,readonly" \
   --workdir /work \
   --entrypoint /bin/bash \
@@ -16,6 +16,10 @@ docker run --rm --privileged \
     mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
     printf "kernel: "; uname -r
     printf "arch: "; uname -m
+    if test -n "${SENTRY_EXPECT_ARCH:-}" && test "${SENTRY_EXPECT_ARCH}" != "$(uname -m)"; then
+      echo "unexpected architecture: expected ${SENTRY_EXPECT_ARCH}, got $(uname -m)" >&2
+      exit 2
+    fi
     test -r /sys/kernel/btf/vmlinux && echo "BTF: present"
     test -e /sys/fs/cgroup/cgroup.controllers && echo "cgroup: v2"
     printf "LSMs: "; cat /sys/kernel/security/lsm
