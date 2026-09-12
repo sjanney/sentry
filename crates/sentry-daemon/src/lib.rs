@@ -105,6 +105,7 @@ struct ProcessRecord {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TrackerError {
     Capacity,
+    Cycle,
     DuplicateProcess,
     UnknownChild,
     UnknownParent,
@@ -185,10 +186,20 @@ impl ProcessTracker {
         if !self.processes.contains_key(&new_parent) {
             return Err(TrackerError::UnknownParent);
         }
+        if !self.processes.contains_key(&child) {
+            return Err(TrackerError::UnknownChild);
+        }
+        let mut cursor = Some(new_parent);
+        while let Some(key) = cursor {
+            if key == child {
+                return Err(TrackerError::Cycle);
+            }
+            cursor = self.processes.get(&key).and_then(|record| record.parent);
+        }
         let child_record = self
             .processes
             .get_mut(&child)
-            .ok_or(TrackerError::UnknownChild)?;
+            .expect("child existence checked above");
         child_record.parent = Some(new_parent);
         Ok(())
     }
@@ -581,6 +592,20 @@ mod tests {
         tracker.fork(attached, child).unwrap();
         tracker.reparent(child, adopted_parent).unwrap();
         assert!(!tracker.can_claim_full_coverage(child));
+    }
+
+    #[test]
+    fn reparenting_rejects_cycles_and_unknown_children() {
+        let parent = key(1, 1);
+        let child = key(2, 2);
+        let mut tracker = ProcessTracker::new(2);
+        tracker.register_launch(parent, 1).unwrap();
+        tracker.fork(parent, child).unwrap();
+        assert_eq!(tracker.reparent(parent, child), Err(TrackerError::Cycle));
+        assert_eq!(
+            tracker.reparent(key(3, 3), parent),
+            Err(TrackerError::UnknownChild)
+        );
     }
 
     #[test]
