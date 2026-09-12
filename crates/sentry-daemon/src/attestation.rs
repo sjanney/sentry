@@ -17,6 +17,8 @@ pub struct ExecutionAttestation {
     pub capability_fingerprint: String,
     pub execution_domain_id: String,
     pub process_tree_id: String,
+    pub root_tgid: u32,
+    pub root_start_time_ticks: u64,
     pub first_event_sequence: u64,
     pub last_event_sequence: u64,
     pub event_sequences: Vec<u64>,
@@ -108,9 +110,26 @@ impl ExecutionAttestation {
         Ok(())
     }
 
+    /// Verifies the root process identity, including its start time so PID
+    /// reuse cannot be mistaken for the original execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EnvironmentMismatch` if either identity component differs.
+    pub fn verify_process_identity(
+        &self,
+        root_tgid: u32,
+        root_start_time_ticks: u64,
+    ) -> Result<(), AttestationError> {
+        if self.root_tgid != root_tgid || self.root_start_time_ticks != root_start_time_ticks {
+            return Err(AttestationError::EnvironmentMismatch);
+        }
+        Ok(())
+    }
+
     fn canonical_encoding(&self) -> Vec<u8> {
         format!(
-            "v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.policy_hash,
             self.policy_revision,
             hex(self.policy_mode.as_bytes()),
@@ -120,6 +139,8 @@ impl ExecutionAttestation {
             hex(self.capability_fingerprint.as_bytes()),
             hex(self.execution_domain_id.as_bytes()),
             hex(self.process_tree_id.as_bytes()),
+            self.root_tgid,
+            self.root_start_time_ticks,
             self.first_event_sequence,
             self.last_event_sequence,
             self.event_sequences
@@ -168,6 +189,8 @@ mod tests {
             capability_fingerprint: "caps-v1".to_owned(),
             execution_domain_id: "domain-1".to_owned(),
             process_tree_id: "tree-1".to_owned(),
+            root_tgid: 100,
+            root_start_time_ticks: 12345,
             first_event_sequence: 1,
             last_event_sequence: 4,
             event_sequences: vec![1, 2, 3, 4],
@@ -245,6 +268,11 @@ mod tests {
         );
         assert_eq!(
             attestation.verify_environment("6.12.55", "aarch64", "caps-v1"),
+            Err(AttestationError::EnvironmentMismatch)
+        );
+        assert_eq!(attestation.verify_process_identity(100, 12345), Ok(()));
+        assert_eq!(
+            attestation.verify_process_identity(100, 12346),
             Err(AttestationError::EnvironmentMismatch)
         );
     }
