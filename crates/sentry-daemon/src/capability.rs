@@ -3,7 +3,10 @@
 
 use std::{collections::BTreeSet, fs, path::Path};
 
-use sentry_policy::compiler::KernelCapability;
+use sentry_policy::compiler::{
+    CompiledKernelPolicy, KernelCapability, KernelPolicyLimits, PolicyCompileError, PolicySpec,
+    compile_kernel_policy,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct KernelPreflight {
@@ -14,6 +17,12 @@ pub struct KernelPreflight {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MissingCapability(pub KernelCapability);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PreflightCompileError {
+    Missing(MissingCapability),
+    InvalidPolicy(PolicyCompileError),
+}
 
 impl KernelPreflight {
     /// Inspects a Linux sysfs root without claiming that a program has attached.
@@ -63,6 +72,23 @@ impl KernelPreflight {
             .find(|capability| !available.contains(capability))
             .copied()
             .map_or(Ok(()), |capability| Err(MissingCapability(capability)))
+    }
+
+    /// Performs capability gating and bounded policy compilation before activation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a missing-capability error before compilation, or the compiler's
+    /// typed policy error when the observed host can represent the policy.
+    pub fn compile_policy(
+        &self,
+        policy: &PolicySpec,
+        limits: KernelPolicyLimits,
+    ) -> Result<CompiledKernelPolicy, PreflightCompileError> {
+        self.require(&policy.required_capabilities)
+            .map_err(PreflightCompileError::Missing)?;
+        compile_kernel_policy(policy, &self.available_capabilities(), limits)
+            .map_err(PreflightCompileError::InvalidPolicy)
     }
 }
 
@@ -168,6 +194,36 @@ mod tests {
         assert_eq!(
             preflight.require(&required),
             Err(MissingCapability(KernelCapability::CgroupV2))
+        );
+    }
+
+    #[test]
+    fn compile_policy_gates_capabilities_before_activation() {
+        let preflight = KernelPreflight {
+            btf_readable: false,
+            bpf_lsm_active: true,
+            cgroup_v2_available: true,
+        };
+        let policy = PolicySpec {
+            schema_version: 1,
+            policy_version: 1,
+            mode: sentry_policy::compiler::PolicyMode::Enforce,
+            default_deny: true,
+            deny_untrusted_egress: false,
+            allowed_domains: BTreeSet::new(),
+            allowed_cidrs: BTreeSet::new(),
+            required_capabilities: BTreeSet::from([KernelCapability::BpfLsm]),
+        };
+        let limits = KernelPolicyLimits {
+            max_domains: 4,
+            max_cidrs: 4,
+            max_serialized_bytes: 1024,
+        };
+        assert_eq!(
+            preflight.compile_policy(&policy, limits),
+            Err(PreflightCompileError::Missing(MissingCapability(
+                KernelCapability::BpfLsm
+            )))
         );
     }
 }
