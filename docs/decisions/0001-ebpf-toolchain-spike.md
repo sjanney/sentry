@@ -53,7 +53,7 @@ The development host is macOS arm64 (`Darwin 25.5.0`), so it cannot load Linux
 BPF programs or provide kernel verifier evidence. It has Rust 1.92.0 and
 resolves the two candidate crates.
 
-On 2026-09-11, the Docker Desktop Linux arm64 VM provided a usable baseline:
+On 2026-09-12, the Docker Desktop Linux arm64 VM provided a usable baseline:
 Linux `6.12.54-linuxkit`, BTF, cgroup v2, and an active BPF LSM
 (`capability,bpf`). The reproducible container probe in
 `tests/vm/toolchain-spike/` compiles a GPL ring-buffer tracepoint program and
