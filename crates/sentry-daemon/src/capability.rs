@@ -16,7 +16,9 @@ impl KernelPreflight {
     /// Inspects a Linux sysfs root without claiming that a program has attached.
     #[must_use]
     pub fn inspect(root: &Path) -> Self {
-        let btf_readable = fs::File::open(root.join("sys/kernel/btf/vmlinux")).is_ok();
+        let btf_readable = fs::metadata(root.join("sys/kernel/btf/vmlinux"))
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false);
         let cgroup_v2_available = root.join("sys/fs/cgroup/cgroup.controllers").exists();
         let bpf_lsm_active = fs::read_to_string(root.join("sys/kernel/security/lsm"))
             .map(|active| active.split(',').any(|name| name.trim() == "bpf"))
@@ -118,5 +120,13 @@ mod tests {
             preflight.available_capabilities(),
             BTreeSet::from([KernelCapability::CgroupV2])
         );
+    }
+
+    #[test]
+    fn btf_directory_is_not_treated_as_readable_btf() {
+        let root = fixture("btf-directory");
+        fs::create_dir_all(root.join("sys/kernel/btf/vmlinux")).unwrap();
+        assert!(!KernelPreflight::inspect(&root).btf_readable);
+        fs::remove_dir_all(root).unwrap();
     }
 }
