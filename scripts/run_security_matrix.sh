@@ -11,10 +11,12 @@ if [[ "$expected_arch" == 'arm64' ]]; then
   expected_arch=aarch64
 fi
 {
-  echo '# Native security matrix result'
+  echo '# Security matrix result'
   echo
-  printf '%s\n' "- machine: \`$machine\`"
-  printf '%s\n' "- kernel: \`$kernel\`"
+  printf '%s\n' "- runner OS: \`$(uname -s)\`"
+  printf '%s\n' "- runner architecture: \`$machine\`"
+  printf '%s\n' "- runner kernel: \`$kernel\`"
+  printf '%s\n' "- probe architecture expectation: \`$expected_arch\`"
   echo '- primary mode: privileged BPF LSM and cgroup probe'
   echo '- fallback mode: seccomp socket-deny probe'
   echo
@@ -30,7 +32,7 @@ fi
   echo '## Result'
   if [[ "$machine" == 'aarch64' || "$machine" == 'arm64' || "$machine" == 'x86_64' ]]; then
     SENTRY_EXPECT_ARCH="$expected_arch" bash tests/vm/kernel-capabilities/probe-linux-container.sh
-    echo "native $machine cell: passed"
+    echo "container $expected_arch cell: passed"
   else
     echo "unsupported native architecture: $machine"
     exit 2
