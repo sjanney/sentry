@@ -196,10 +196,9 @@ impl ProcessTracker {
             }
             cursor = self.processes.get(&key).and_then(|record| record.parent);
         }
-        let child_record = self
-            .processes
-            .get_mut(&child)
-            .expect("child existence checked above");
+        let Some(child_record) = self.processes.get_mut(&child) else {
+            return Err(TrackerError::UnknownChild);
+        };
         child_record.parent = Some(new_parent);
         Ok(())
     }
