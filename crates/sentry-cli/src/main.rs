@@ -14,6 +14,8 @@ use sentry_policy::{
 };
 use std::collections::BTreeSet;
 
+const USAGE: &str = "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run --allow-domain DOMAIN --domain DOMAIN [--secret] | attach <pid> | capabilities | audit verify <path>";
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let result: Result<CommandOutcome, String> = match arguments.first().map(String::as_str) {
@@ -36,15 +38,27 @@ fn main() {
                 let preflight = KernelPreflight::inspect(std::path::Path::new("/"));
                 println!(
                     "btf: {} (preflight)",
-                    if preflight.btf_readable { "present" } else { "missing" }
+                    if preflight.btf_readable {
+                        "present"
+                    } else {
+                        "missing"
+                    }
                 );
                 println!(
                     "bpf-lsm: {} (preflight; attachment unverified)",
-                    if preflight.bpf_lsm_active { "active" } else { "inactive" }
+                    if preflight.bpf_lsm_active {
+                        "active"
+                    } else {
+                        "inactive"
+                    }
                 );
                 println!(
                     "cgroup-v2: {} (preflight; attachment unverified)",
-                    if preflight.cgroup_v2_available { "present" } else { "missing" }
+                    if preflight.cgroup_v2_available {
+                        "present"
+                    } else {
+                        "missing"
+                    }
                 );
                 for capability in capabilities {
                     println!("{}", render_capability(capability));
@@ -55,24 +69,32 @@ fn main() {
         Some("audit") if arguments.get(1).map(String::as_str) == Some("verify") => arguments
             .get(2)
             .ok_or_else(|| "audit verify requires a log path".to_owned())
-            .and_then(|path| audit::verify(std::path::Path::new(path), None).map_err(|error| render_audit_error(&error)))
+            .and_then(|path| {
+                audit::verify(std::path::Path::new(path), None)
+                    .map_err(|error| render_audit_error(&error))
+            })
             .map(|checkpoint| {
                 match checkpoint {
-                    Some(checkpoint) => println!("verified audit sequence {} hash {}", checkpoint.sequence, hex(&checkpoint.hash)),
+                    Some(checkpoint) => println!(
+                        "verified audit sequence {} hash {}",
+                        checkpoint.sequence,
+                        hex(&checkpoint.hash)
+                    ),
                     None => println!("verified empty audit log"),
                 }
                 CommandOutcome::Exited(0)
             }),
         Some("dry-run") => dry_run(&arguments[1..]),
         Some("generate") => generate_candidate(&arguments[1..]),
+        Some("--help" | "help") => {
+            println!("{USAGE}");
+            Ok(CommandOutcome::Exited(0))
+        }
         Some("--version" | "version") => {
             println!("sentry {}", env!("CARGO_PKG_VERSION"));
             Ok(CommandOutcome::Exited(0))
         }
-        _ => Err(
-            "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run --allow-domain DOMAIN --domain DOMAIN [--secret] | attach <pid> | capabilities | audit verify <path>"
-                .to_owned(),
-        ),
+        _ => Err(USAGE.to_owned()),
     };
     match result {
         Ok(CommandOutcome::Exited(code)) => process::exit(code),

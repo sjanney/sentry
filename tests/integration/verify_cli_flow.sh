@@ -8,6 +8,9 @@ trap 'rm -rf "$workdir"' EXIT
 
 cd "$root"
 
+help=$(cargo run -q -p sentry-cli -- --help)
+grep -Fq 'usage: sentry' <<<"$help"
+
 candidate=$(cargo run -q -p sentry-cli -- generate \
   --run-id cli-flow --workspace /workspace/demo --domain api.example.test)
 grep -Fq 'mode = "dry_run"' <<<"$candidate"
