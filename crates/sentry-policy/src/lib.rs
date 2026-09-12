@@ -146,6 +146,63 @@ pub struct BehavioralProfile {
     pub issues: Vec<ProfileIssue>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileVerdict {
+    Pass,
+    Fail,
+    Inconclusive,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileDiff {
+    pub added: BTreeSet<String>,
+    pub removed: BTreeSet<String>,
+    pub verdict: ProfileVerdict,
+}
+
+/// Computes a deterministic, machine-readable drift result between profiles.
+/// Any profile issue makes the result inconclusive; otherwise a changed set of
+/// observed permissions is a fail and an identical set is a pass.
+#[must_use]
+pub fn diff_profiles(before: &BehavioralProfile, after: &BehavioralProfile) -> ProfileDiff {
+    let before_values = profile_values(before);
+    let after_values = profile_values(after);
+    let added: BTreeSet<String> = after_values.difference(&before_values).cloned().collect();
+    let removed: BTreeSet<String> = before_values.difference(&after_values).cloned().collect();
+    let verdict = if !before.issues.is_empty() || !after.issues.is_empty() {
+        ProfileVerdict::Inconclusive
+    } else if added.is_empty() && removed.is_empty() {
+        ProfileVerdict::Pass
+    } else {
+        ProfileVerdict::Fail
+    };
+    ProfileDiff {
+        added,
+        removed,
+        verdict,
+    }
+}
+
+fn profile_values(profile: &BehavioralProfile) -> BTreeSet<String> {
+    profile
+        .workspace_paths
+        .iter()
+        .map(|value| format!("workspace:{value}"))
+        .chain(
+            profile
+                .domains
+                .iter()
+                .map(|value| format!("domain:{value}")),
+        )
+        .chain(
+            profile
+                .credential_classes
+                .iter()
+                .map(|value| format!("credential:{value:?}")),
+        )
+        .collect()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProfileError {
     DuplicateRunId { run_id: String },
@@ -479,6 +536,46 @@ mod tests {
         assert_eq!(
             forward.provenance.get("domain:api.example.test"),
             Some(&BTreeSet::from(["run-1".to_owned()]))
+        );
+    }
+
+    #[test]
+    fn profile_diff_is_deterministic_and_marks_drift_or_incomplete_evidence() {
+        let before = merge_profile([observation(
+            "run-1",
+            RunCompleteness::Complete,
+            ObservationTrust::Trusted,
+            &["/work/a"],
+            &["api.example.test"],
+            &[],
+        )])
+        .unwrap();
+        let after = merge_profile([observation(
+            "run-2",
+            RunCompleteness::Complete,
+            ObservationTrust::Trusted,
+            &["/work/a", "/work/b"],
+            &["api.example.test"],
+            &[],
+        )])
+        .unwrap();
+        let diff = diff_profiles(&before, &after);
+        assert_eq!(diff.verdict, ProfileVerdict::Fail);
+        assert_eq!(diff.added, BTreeSet::from(["workspace:/work/b".to_owned()]));
+        assert!(diff.removed.is_empty());
+
+        let incomplete = merge_profile([observation(
+            "partial",
+            RunCompleteness::PartialCoverage,
+            ObservationTrust::Trusted,
+            &[],
+            &[],
+            &[],
+        )])
+        .unwrap();
+        assert_eq!(
+            diff_profiles(&before, &incomplete).verdict,
+            ProfileVerdict::Inconclusive
         );
     }
 
