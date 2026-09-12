@@ -203,7 +203,9 @@
         "p95_cpu_ms": 0.6539999999999324
       },
       "cpu_overhead_percent": 361.45498392289755,
-      "cpu_gate_passed": false
+      "cpu_gate_passed": false,
+      "p95_cpu_delta_ms": 0.5190000000006023,
+      "p95_wall_delta_ms": 0.7409589999999999
     },
     {
       "workload": "50k-stat-syscalls",
@@ -388,7 +390,9 @@
         "p95_cpu_ms": 34.114999999999895
       },
       "cpu_overhead_percent": 0.9506754353412294,
-      "cpu_gate_passed": true
+      "cpu_gate_passed": true,
+      "p95_cpu_delta_ms": 0.7779999999995013,
+      "p95_wall_delta_ms": 1.1498339999999985
     }
   ]
 }

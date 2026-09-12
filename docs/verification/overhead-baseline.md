@@ -9,7 +9,8 @@ Run `cargo build --release -p sentry-cli` and then
 `python3 scripts/benchmark_overhead.py` on a supported Linux host. The runner
 uses five warmups and 20 repeats for process-start and 50,000 `stat` syscalls.
 It writes raw per-repeat CPU and wall-clock samples, mean, standard deviation,
-p95, gate result, kernel/machine/Python metadata, and schema version to
+p95 values and p95 baseline-to-Sentry deltas for tail latency, gate result,
+kernel/machine/Python metadata, and schema version to
 `artifacts/overhead-baseline.json` (or `SENTRY_BENCHMARK_OUTPUT`).
 
 This repository is currently being developed from macOS, where the sensor CLI

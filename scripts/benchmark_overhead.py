@@ -53,8 +53,11 @@ def measure(name: str, direct: list[str], wrapped: list[str]) -> dict[str, objec
     observed_summary = summarize(observed)
     baseline_cpu = baseline_summary["mean_cpu_ms"]
     overhead = None if baseline_cpu == 0 else 100 * (observed_summary["mean_cpu_ms"] - baseline_cpu) / baseline_cpu
+    p95_cpu_delta = observed_summary["p95_cpu_ms"] - baseline_summary["p95_cpu_ms"]
+    p95_wall_delta = observed_summary["p95_wall_ms"] - baseline_summary["p95_wall_ms"]
     return {"workload": name, "baseline": baseline, "sentry": observed,
             "baseline_summary": baseline_summary, "sentry_summary": observed_summary,
+            "p95_cpu_delta_ms": p95_cpu_delta, "p95_wall_delta_ms": p95_wall_delta,
             "cpu_overhead_percent": overhead, "cpu_gate_passed": overhead is not None and overhead < 2}
 
 
