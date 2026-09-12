@@ -24,6 +24,7 @@ int main(int argc, char **argv)
     uint8_t enabled = 1;
     struct stat protected_stat;
     int protected_fd = -1;
+    int inherited_fd = -1;
     int result = 1;
 
     if (argc != 2) {
@@ -43,6 +44,11 @@ int main(int argc, char **argv)
         goto out;
     }
     protected_fd = -1;
+    inherited_fd = open(protected_path, O_RDONLY);
+    if (inherited_fd < 0) {
+        perror("open inherited descriptor before policy activation");
+        goto out;
+    }
     protected_fd = open(workspace_path, O_CREAT | O_WRONLY | O_TRUNC, 0600);
     if (protected_fd < 0 || close(protected_fd) != 0 ||
         link(protected_path, hardlink_path) != 0 || symlink(protected_path, symlink_path) != 0 ||
@@ -78,6 +84,13 @@ int main(int argc, char **argv)
         goto out;
     }
 
+    /* file_open cannot revoke an already-open descriptor. This is intentional
+     * evidence for the policy rejection described in the limitations doc. */
+    if (read(inherited_fd, &(char){0}, 0) != 0) {
+        perror("expected inherited descriptor to remain usable");
+        goto out;
+    }
+
     protected_fd = open(workspace_path, O_RDONLY);
     if (protected_fd < 0 || close(protected_fd) != 0) {
         perror("expected workspace open to succeed");
@@ -106,12 +119,14 @@ int main(int argc, char **argv)
                 protected_fd, errno);
         goto out;
     }
-    puts("BPF LSM selective file-open denial and alias checks succeeded");
+    puts("BPF LSM selective file-open denial, alias checks, and inherited-FD limitation succeeded");
     result = 0;
 
 out:
     if (protected_fd >= 0)
         close(protected_fd);
+    if (inherited_fd >= 0)
+        close(inherited_fd);
     if (lsm_link)
         bpf_link__destroy(lsm_link);
     if (object)
