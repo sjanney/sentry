@@ -11,6 +11,12 @@ cd "$root"
 help=$(cargo run -q -p sentry-cli -- --help)
 grep -Fq 'usage: sentry' <<<"$help"
 
+daemon_info=$(cargo run -q -p sentry-daemon)
+grep -Fq 'sentryd ' <<<"$daemon_info"
+if [[ $(uname -s) != Linux ]]; then
+  grep -Fq 'host: unsupported (Linux required)' <<<"$daemon_info"
+fi
+
 candidate=$(cargo run -q -p sentry-cli -- generate \
   --run-id cli-flow --workspace /workspace/demo --domain api.example.test)
 grep -Fq 'mode = "dry_run"' <<<"$candidate"
