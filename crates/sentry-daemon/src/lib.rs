@@ -522,6 +522,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn malformed_events_do_not_consume_local_sequence_numbers() {
+        let mut ingestor = EventIngestor::new(2);
+        assert_eq!(
+            ingestor.ingest(
+                &[0; EVENT_HEADER_SIZE - 1],
+                RedactedTarget::Public("bad".to_owned())
+            ),
+            IngestOutcome::Malformed
+        );
+        assert_eq!(
+            ingestor.ingest(&encoded_exec(), RedactedTarget::Public("ok".to_owned())),
+            IngestOutcome::Accepted { sequence: 1 }
+        );
+    }
+
     fn key(tgid: u32, start_time_ns: u64) -> ProcessKey {
         ProcessKey {
             tgid,
