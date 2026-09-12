@@ -14,7 +14,7 @@ use sentry_policy::{
 };
 use std::collections::BTreeSet;
 
-const USAGE: &str = "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run --allow-domain DOMAIN --domain DOMAIN [--secret] | attach <pid> | capabilities | audit verify <path>";
+const USAGE: &str = "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run (--allow-domain DOMAIN --domain DOMAIN | --allow-cidr CIDR --ip IP) [--secret] | attach <pid> | capabilities | audit verify <path>";
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -172,7 +172,9 @@ fn generate_candidate(arguments: &[String]) -> Result<CommandOutcome, String> {
 
 fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {
     let mut allowed = None;
+    let mut allowed_cidr = None;
     let mut domain = None;
+    let mut ip = None;
     let mut secret = false;
     let mut index = 0;
     while index < arguments.len() {
@@ -181,17 +183,38 @@ fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {
                 index += 1;
                 allowed = arguments.get(index).cloned();
             }
+            "--allow-cidr" => {
+                index += 1;
+                allowed_cidr = arguments.get(index).cloned();
+            }
             "--domain" => {
                 index += 1;
                 domain = arguments.get(index).cloned();
+            }
+            "--ip" => {
+                index += 1;
+                ip = arguments.get(index).cloned();
             }
             "--secret" => secret = true,
             _ => return Err("unknown dry-run option".to_owned()),
         }
         index += 1;
     }
-    let allowed = allowed.ok_or_else(|| "dry-run requires --allow-domain DOMAIN".to_owned())?;
-    let domain = domain.ok_or_else(|| "dry-run requires --domain DOMAIN".to_owned())?;
+    if allowed.is_none() && allowed_cidr.is_none() {
+        return Err("dry-run requires --allow-domain DOMAIN or --allow-cidr CIDR".to_owned());
+    }
+    let domain = domain.as_deref();
+    if allowed.is_some() && domain.is_none() {
+        return Err("--allow-domain requires --domain DOMAIN".to_owned());
+    }
+    if allowed_cidr.is_some() && ip.is_none() {
+        return Err("--allow-cidr requires --ip IP".to_owned());
+    }
+    let ip = ip
+        .as_deref()
+        .map(str::parse)
+        .transpose()
+        .map_err(|_| "--ip requires a valid IP address".to_owned())?;
     let capabilities = BTreeSet::from([
         KernelCapability::BpfLsm,
         KernelCapability::CgroupV2,
@@ -203,8 +226,8 @@ fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {
         mode: PolicyMode::DryRun,
         default_deny: true,
         deny_untrusted_egress: true,
-        allowed_domains: BTreeSet::from([allowed]),
-        allowed_cidrs: BTreeSet::new(),
+        allowed_domains: allowed.into_iter().collect(),
+        allowed_cidrs: allowed_cidr.into_iter().collect(),
         required_capabilities: capabilities.clone(),
     };
     let compiled = compile_kernel_policy(
@@ -223,9 +246,9 @@ fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {
             untrusted_input: false,
         },
         Destination {
-            ip: None,
-            domain: Some(&domain),
-            dns_observed: true,
+            ip,
+            domain,
+            dns_observed: domain.is_some(),
             ttl_valid: true,
             same_execution_domain: true,
         },

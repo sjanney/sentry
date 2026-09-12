@@ -32,6 +32,9 @@ Use `sentry dry-run --allow-domain api.example.test --domain api.example.test
 would-deny explanation. It is a local policy-semantic command; it does not
 activate kernel enforcement.
 
+CIDR rules can be evaluated with `sentry dry-run --allow-cidr 198.51.100.0/24
+--ip 198.51.100.7`.
+
 Run the host-safe verification suite with `bash scripts/verify.sh`. On a
 native arm64 Linux Docker host, run
 `bash tests/vm/kernel-capabilities/probe-linux-container.sh` for the privileged

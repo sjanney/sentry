@@ -21,6 +21,10 @@ dry_run=$(cargo run -q -p sentry-cli -- dry-run \
 grep -Fq 'would_deny=true' <<<"$dry_run"
 grep -Fq 'rule_id=Some(SecretTaintDeny)' <<<"$dry_run"
 
+cidr_dry_run=$(cargo run -q -p sentry-cli -- dry-run \
+  --allow-cidr 198.51.100.0/24 --ip 198.51.100.7)
+grep -Fq 'would_deny=false' <<<"$cidr_dry_run"
+
 if [[ $(uname -s) == Linux ]]; then
   audit_log="$workdir/audit.log"
   cargo run -q -p sentry-cli -- observe --audit-log "$audit_log" -- sh -c 'exit 0'
