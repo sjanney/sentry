@@ -43,6 +43,91 @@ pub fn load_policy_spec_json(input: &str) -> Result<PolicySpec, serde_json::Erro
     serde_json::from_str(input)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PolicyV0Error {
+    Json(String),
+    UnsupportedSchema(u32),
+    InvalidDefaultAction,
+    SecretTaintMustDeny,
+    InvalidCredentialClass(String),
+    InvalidWorkspaceRoot,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyV0Document {
+    schema_version: u32,
+    mode: PolicyMode,
+    default_action: String,
+    workspace: PolicyV0Workspace,
+    credential_classes: Vec<String>,
+    destinations: PolicyV0Destinations,
+    taint: PolicyV0Taint,
+    required_capabilities: BTreeSet<KernelCapability>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyV0Workspace {
+    roots: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyV0Destinations {
+    allowed_domains: BTreeSet<String>,
+    allowed_cidrs: BTreeSet<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyV0Taint {
+    secret: String,
+    untrusted_input: String,
+}
+
+/// Adapts the documented v0 JSON policy into the bounded compiler shape.
+///
+/// # Errors
+///
+/// Returns a typed error for malformed JSON or any v0 schema/semantic mismatch.
+pub fn load_policy_v0_json(input: &str) -> Result<PolicySpec, PolicyV0Error> {
+    let document: PolicyV0Document =
+        serde_json::from_str(input).map_err(|error| PolicyV0Error::Json(error.to_string()))?;
+    if document.schema_version != 1 {
+        return Err(PolicyV0Error::UnsupportedSchema(document.schema_version));
+    }
+    if document.default_action != "deny" {
+        return Err(PolicyV0Error::InvalidDefaultAction);
+    }
+    if document.taint.secret != "deny" {
+        return Err(PolicyV0Error::SecretTaintMustDeny);
+    }
+    for root in document.workspace.roots {
+        if root.is_empty() || root.bytes().any(|byte| byte.is_ascii_control()) {
+            return Err(PolicyV0Error::InvalidWorkspaceRoot);
+        }
+    }
+    for class in document.credential_classes {
+        if !matches!(
+            class.as_str(),
+            "ssh_key" | "cloud_credential" | "dotenv" | "keyring" | "token_cache"
+        ) {
+            return Err(PolicyV0Error::InvalidCredentialClass(class));
+        }
+    }
+    Ok(PolicySpec {
+        schema_version: 1,
+        policy_version: 1,
+        mode: document.mode,
+        default_deny: true,
+        deny_untrusted_egress: document.taint.untrusted_input == "deny",
+        allowed_domains: document.destinations.allowed_domains,
+        allowed_cidrs: document.destinations.allowed_cidrs,
+        required_capabilities: document.required_capabilities,
+    })
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KernelPolicyLimits {
     pub max_domains: usize,
@@ -632,6 +717,20 @@ mod tests {
         );
         assert!(load_policy_spec_json(
             r#"{"schema_version":1,"policy_version":4,"mode":"enforce","default_deny":true,"deny_untrusted_egress":false,"allowed_domains":[],"allowed_cidrs":[],"required_capabilities":[],"unexpected":true}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn v0_loader_validates_documented_schema_and_maps_taint_action() {
+        let policy = load_policy_v0_json(
+            r#"{"schema_version":1,"mode":"enforce","default_action":"deny","workspace":{"roots":["/work/project"]},"credential_classes":["ssh_key"],"destinations":{"allowed_domains":["api.example.test"],"allowed_cidrs":[]},"taint":{"secret":"deny","untrusted_input":"deny"},"required_capabilities":["bpf_lsm","cgroup_v2","dns_observation"]}"#,
+        )
+        .unwrap();
+        assert!(policy.default_deny && policy.deny_untrusted_egress);
+        assert_eq!(policy.allowed_domains.len(), 1);
+        assert!(load_policy_v0_json(
+            r#"{"schema_version":1,"mode":"enforce","default_action":"allow","workspace":{"roots":[]},"credential_classes":[],"destinations":{"allowed_domains":[],"allowed_cidrs":[]},"taint":{"secret":"deny","untrusted_input":"audit"},"required_capabilities":[]}"#,
         )
         .is_err());
     }
