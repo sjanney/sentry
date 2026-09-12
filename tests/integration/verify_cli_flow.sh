@@ -49,6 +49,11 @@ if cargo run -q -p sentry-cli -- audit verify /tmp/sentry-missing-audit \
   echo 'audit verify accepted a malformed checkpoint hash' >&2
   exit 1
 fi
+if cargo run -q -p sentry-cli -- audit verify /tmp/sentry-missing-audit \
+  --checkpoint-sequence 1 --checkpoint-hash 'éééééééééééééééééééééééééééééé'; then
+  echo 'audit verify accepted a non-ASCII checkpoint hash' >&2
+  exit 1
+fi
 checkpoint_log="$workdir/rotated-audit.log"
 : > "$checkpoint_log"
 checkpoint_result=$(cargo run -q -p sentry-cli -- audit verify "$checkpoint_log" \

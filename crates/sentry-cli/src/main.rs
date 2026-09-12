@@ -140,7 +140,7 @@ fn verify_audit(arguments: &[String]) -> Result<CommandOutcome, String> {
 }
 
 fn parse_hash(value: &str) -> Result<[u8; 32], String> {
-    if value.len() != 64 {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("checkpoint hash must contain exactly 64 hex characters".to_owned());
     }
     let mut hash = [0; 32];
