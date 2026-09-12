@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 use std::process;
 
-use sentry_cli::{Capability, CliError, CommandOutcome, attach, capabilities, run_command};
+use sentry_cli::{Capability, CliError, CommandOutcome, capabilities, run_command};
 use sentry_daemon::audit::{self, AuditEvent, AuditLog};
 use sentry_daemon::capability::KernelPreflight;
+use sentry_daemon::process_snapshot::{SnapshotError, snapshot_process_tree};
 use sentry_policy::{
     Destination, ObservationTrust, RunCompleteness, RunObservation, TaintMask,
     compiler::{
@@ -29,13 +30,7 @@ fn main() {
             }
         }
         Some("observe") => observe_command(&arguments[1..]),
-        Some("attach") => arguments
-            .get(1)
-            .ok_or(CliError::InvalidPid)
-            .and_then(|pid| pid.parse().map_err(|_| CliError::InvalidPid))
-            .and_then(|pid| attach(pid, std::env::consts::OS))
-            .map(|()| CommandOutcome::Exited(0))
-            .map_err(|error| render_error(&error)),
+        Some("attach") => attach_command(&arguments[1..]),
         Some("capabilities") => capabilities(std::env::consts::OS)
             .map(|capabilities| {
                 let preflight = KernelPreflight::inspect(std::path::Path::new("/"));
@@ -87,6 +82,36 @@ fn main() {
             process::exit(2);
         }
     }
+}
+
+fn attach_command(arguments: &[String]) -> Result<CommandOutcome, String> {
+    if std::env::consts::OS != "linux" {
+        return Err(render_error(&CliError::UnsupportedHost));
+    }
+    if arguments.len() != 1 {
+        return Err("attach requires exactly one PID".to_owned());
+    }
+    let pid = arguments
+        .first()
+        .ok_or(CliError::InvalidPid)
+        .and_then(|pid| pid.parse().map_err(|_| CliError::InvalidPid))
+        .map_err(|error| render_error(&error))?;
+    let snapshot =
+        snapshot_process_tree(std::path::Path::new("/proc"), pid).map_err(|error| match error {
+            SnapshotError::InvalidPid => render_error(&CliError::InvalidPid),
+            SnapshotError::RootUnavailable => "attach target exited or is inaccessible".to_owned(),
+            SnapshotError::RootChanged | SnapshotError::InconsistentTree => {
+                "attach target changed during snapshot; retry the attach".to_owned()
+            }
+        })?;
+    println!(
+        "attach snapshot: root={} start_ticks={} processes={} skipped={} coverage=partial",
+        snapshot.root.tgid,
+        snapshot.root.start_time_ticks,
+        snapshot.processes.len(),
+        snapshot.skipped_processes
+    );
+    Ok(CommandOutcome::Exited(0))
 }
 
 fn generate_candidate(arguments: &[String]) -> Result<CommandOutcome, String> {
@@ -253,8 +278,8 @@ fn terminate_with_signal(signal: i32) -> ! {
 fn render_capability(capability: Capability) -> &'static str {
     match capability {
         Capability::ObserverUnavailable => "observer: unavailable (eBPF integration pending)",
-        Capability::AttachUnavailable => {
-            "attach: unavailable (process attachment integration pending)"
+        Capability::AttachSnapshotOnly => {
+            "attach: partial process snapshot only (live sensor integration pending)"
         }
     }
 }
@@ -262,11 +287,8 @@ fn render_capability(capability: Capability) -> &'static str {
 fn render_error(error: &CliError) -> String {
     match error {
         CliError::MissingCommand => "a command is required".to_owned(),
-        CliError::InvalidPid => "attach requires a numeric PID".to_owned(),
+        CliError::InvalidPid => "attach requires a non-zero numeric PID".to_owned(),
         CliError::UnsupportedHost => "this MVP supports Linux hosts only".to_owned(),
-        CliError::AttachUnavailable { pid } => {
-            format!("attach to PID {pid} is not available in this MVP; use run or observe")
-        }
         CliError::Spawn(kind) => format!("could not start command: {kind}"),
     }
 }

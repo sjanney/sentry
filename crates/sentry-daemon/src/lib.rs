@@ -2,6 +2,7 @@
 pub mod audit;
 pub mod capability;
 pub mod lifecycle;
+pub mod process_snapshot;
 
 use std::{
     collections::{HashMap, VecDeque},

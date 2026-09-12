@@ -23,6 +23,10 @@ if [[ $(uname -s) == Linux ]]; then
   cargo run -q -p sentry-cli -- observe --audit-log "$audit_log" -- sh -c 'exit 0'
   audit_result=$(cargo run -q -p sentry-cli -- audit verify "$audit_log")
   grep -Fq 'verified audit sequence 2' <<<"$audit_result"
+  if cargo run -q -p sentry-cli -- attach 1 unexpected; then
+    echo 'attach accepted unexpected arguments' >&2
+    exit 1
+  fi
 else
   echo 'skipped Linux-only observe CLI flow'
 fi

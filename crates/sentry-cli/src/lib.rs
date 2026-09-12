@@ -6,14 +6,13 @@ pub enum CliError {
     MissingCommand,
     InvalidPid,
     UnsupportedHost,
-    AttachUnavailable { pid: u32 },
     Spawn(io::ErrorKind),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Capability {
     ObserverUnavailable,
-    AttachUnavailable,
+    AttachSnapshotOnly,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,18 +44,6 @@ pub fn run_command(command: &[String]) -> Result<CommandOutcome, CliError> {
     ))
 }
 
-/// Validates the host and reports the MVP attach limitation without attaching.
-///
-/// # Errors
-///
-/// Returns a typed host or attach limitation that callers can render safely.
-pub fn attach(pid: u32, os: &str) -> Result<(), CliError> {
-    if !host_supported(os) {
-        return Err(CliError::UnsupportedHost);
-    }
-    Err(CliError::AttachUnavailable { pid })
-}
-
 /// # Errors
 ///
 /// Returns `UnsupportedHost` when the host cannot run the Linux MVP.
@@ -66,7 +53,7 @@ pub fn capabilities(os: &str) -> Result<[Capability; 2], CliError> {
     }
     Ok([
         Capability::ObserverUnavailable,
-        Capability::AttachUnavailable,
+        Capability::AttachSnapshotOnly,
     ])
 }
 
@@ -89,15 +76,12 @@ mod tests {
     #[test]
     fn missing_commands_and_unsupported_hosts_are_typed_errors() {
         assert_eq!(run_command(&[]), Err(CliError::MissingCommand));
-        assert_eq!(attach(42, "macos"), Err(CliError::UnsupportedHost));
+        assert!(!host_supported("macos"));
         assert_eq!(capabilities("windows"), Err(CliError::UnsupportedHost));
     }
 
     #[test]
-    fn linux_attach_is_an_explicit_mvp_limitation() {
-        assert_eq!(
-            attach(42, "linux"),
-            Err(CliError::AttachUnavailable { pid: 42 })
-        );
+    fn linux_host_is_supported() {
+        assert!(host_supported("linux"));
     }
 }

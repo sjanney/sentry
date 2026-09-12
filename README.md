@@ -19,8 +19,9 @@ target/release/sentry capabilities
 The binary reports the current capability limitations. `sentry run -- COMMAND`
 preserves command exit status and signals. `sentry observe --audit-log LOG --
 COMMAND` adds redacted command start/outcome audit records, which can be checked
-with `sentry audit verify LOG`, on a supported Linux host. `attach PID` is intentionally unavailable until runtime
-process attachment is integrated.
+with `sentry audit verify LOG`, on a supported Linux host. `attach PID` reports
+the current Linux process tree with partial coverage; it does not yet attach a
+live sensor or activate enforcement.
 
 Use `sentry generate --run-id demo-1 --workspace "$PWD" --domain
 api.example.test` to render a review-only candidate from one explicitly supplied

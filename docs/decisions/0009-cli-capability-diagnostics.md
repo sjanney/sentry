@@ -4,9 +4,10 @@ Status: accepted
 
 `sentry run -- <command>` and `sentry observe -- <command>` invoke arbitrary
 commands and return the command's exit code. They do not claim enforcement
-until the kernel observer is integrated. `sentry attach <pid>` is exposed now
-so scripts have a stable interface, but returns an explicit typed limitation on
-Linux until process-attachment integration exists.
+until the kernel observer is integrated. `sentry attach <pid>` returns a
+best-effort Linux `/proc` snapshot with a stable process start identity and
+explicit partial coverage. It neither attaches a live sensor nor upgrades to
+complete coverage after a later exec.
 
 `sentry capabilities` lists these limits. Non-Linux hosts return a typed
 unsupported-host error instead of panicking or presenting an enforcement claim.
