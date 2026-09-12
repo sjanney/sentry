@@ -64,6 +64,12 @@ issues, but add no grant. In particular, a malicious observation cannot teach
 the product that credential access is normal. A generated profile remains a
 review artifact; it does not automatically alter an enforcing policy.
 
+The policy library also exposes `diff_profiles`, which returns sorted added and
+removed permission keys plus a machine-readable `Pass`, `Fail`, or
+`Inconclusive` verdict. Any incomplete or untrusted profile issue forces the
+inconclusive result; a changed permission set is reported as drift rather than
+silently merged.
+
 ## Candidate generation
 
 `render_policy_candidate` produces a human-readable review artifact with stable
