@@ -13,6 +13,15 @@ python3 tests/integration/adversarial/verify_real_agent_record.py \
 audit_fixture=$(mktemp)
 trap 'rm -f "$audit_fixture"' EXIT
 python3 scripts/verify_audit_log.py "$audit_fixture"
+python3 - "$audit_fixture" <<'PY'
+import hashlib
+import sys
+
+body = "v1|1|72|1|0000000000000000|64|-|74|" + "00" * 32
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    output.write(f"{body}|{hashlib.sha256(body.encode()).hexdigest()}\n")
+PY
+python3 scripts/verify_audit_log.py "$audit_fixture" | grep -Fq 'verified 1 audit records'
 if python3 scripts/verify_audit_log.py "$audit_fixture" invalid 00; then
   echo 'audit verifier accepted an invalid checkpoint sequence' >&2
   exit 1
