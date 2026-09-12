@@ -313,6 +313,19 @@ impl PolicyActivation {
     pub fn active(&self) -> Option<CompiledKernelPolicy> {
         self.active.read().ok().and_then(|active| active.clone())
     }
+
+    /// Reads the active policy without collapsing lock failure into “none”.
+    /// Enforcement callers should use this method and refuse work on error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ActivationError::Poisoned` if the policy lock is poisoned.
+    pub fn active_checked(&self) -> Result<Option<CompiledKernelPolicy>, ActivationError> {
+        self.active
+            .read()
+            .map(|active| active.clone())
+            .map_err(|_| ActivationError::Poisoned)
+    }
 }
 
 impl Default for PolicyActivation {
@@ -547,6 +560,16 @@ mod tests {
             activation.activate(conflict),
             Err(ActivationError::VersionConflict)
         );
+    }
+
+    #[test]
+    fn checked_active_read_preserves_empty_state_and_policy_identity() {
+        let activation = PolicyActivation::new();
+        assert_eq!(activation.active_checked(), Ok(None));
+        let spec = policy();
+        let compiled = compile_kernel_policy(&spec, &spec.required_capabilities, limits()).unwrap();
+        activation.activate(compiled.clone()).unwrap();
+        assert_eq!(activation.active_checked(), Ok(Some(compiled)));
     }
 
     #[test]
