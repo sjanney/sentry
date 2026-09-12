@@ -10,6 +10,13 @@ expected_arch=$machine
 if [[ "$expected_arch" == 'arm64' ]]; then
   expected_arch=aarch64
 fi
+if [[ "$machine" == 'aarch64' || "$machine" == 'arm64' || "$machine" == 'x86_64' ]]; then
+  probe_output=$(SENTRY_EXPECT_ARCH="$expected_arch" bash tests/vm/kernel-capabilities/probe-linux-container.sh 2>&1)
+else
+  echo "unsupported runner architecture: $machine" >&2
+  exit 2
+fi
+
 {
   echo '# Security matrix result'
   echo
@@ -23,18 +30,13 @@ fi
   echo '## Coverage cells'
   echo '| cell | status | reason |'
   echo '|---|---|---|'
-  echo '| container kernel probes | running | BPF LSM, cgroup, and seccomp checks below |'
+  echo '| container kernel probes | passed | BPF LSM, cgroup, and seccomp checks below |'
   echo '| launch enforcement | unsupported | CLI launch is not wired to policy maps |'
   echo '| attach enforcement | unsupported | attach path is observation-only |'
   echo '| adversarial workload | unsupported | live event ingestion and audit emission are not wired |'
   echo '| legitimate workload | unsupported | live event ingestion and audit emission are not wired |'
   echo
   echo '## Result'
-  if [[ "$machine" == 'aarch64' || "$machine" == 'arm64' || "$machine" == 'x86_64' ]]; then
-    SENTRY_EXPECT_ARCH="$expected_arch" bash tests/vm/kernel-capabilities/probe-linux-container.sh
-    echo "container $expected_arch cell: passed"
-  else
-    echo "unsupported runner architecture: $machine"
-    exit 2
-  fi
+  printf '%s\n' "$probe_output"
+  echo "container $expected_arch cell: passed"
 } | tee "$output"
