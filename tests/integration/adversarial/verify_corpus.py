@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify deterministic synthetic adversarial fixtures and a loopback sink."""
 import socket
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -16,7 +17,21 @@ def main() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sink:
         sink.bind(("127.0.0.1", 0))
         sink.listen(1)
-        assert sink.getsockname()[0] == "127.0.0.1"
+        sink.settimeout(2)
+        host, port = sink.getsockname()
+        assert host == "127.0.0.1"
+
+        def attempted_exfiltration() -> None:
+            with socket.create_connection((host, port), timeout=2) as client:
+                client.sendall(MARKER.encode("ascii"))
+
+        attempt = threading.Thread(target=attempted_exfiltration)
+        attempt.start()
+        connection, _ = sink.accept()
+        with connection:
+            assert connection.recv(1024) == MARKER.encode("ascii")
+        attempt.join(timeout=2)
+        assert not attempt.is_alive()
     print("verified adversarial corpus")
     return 0
 
