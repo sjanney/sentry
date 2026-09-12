@@ -3,7 +3,10 @@
 
 pub mod compiler;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
+};
 
 use sentry_types::EventKind;
 
@@ -15,6 +18,7 @@ pub struct TaintMask {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Destination<'a> {
+    pub ip: Option<IpAddr>,
     pub domain: Option<&'a str>,
     pub dns_observed: bool,
     pub ttl_valid: bool,
@@ -24,6 +28,7 @@ pub struct Destination<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EgressPolicy<'a> {
     pub allowed_domains: &'a [&'a str],
+    pub allowed_cidrs: &'a [&'a str],
     pub deny_untrusted_egress: bool,
 }
 
@@ -47,18 +52,47 @@ pub fn decide_egress(
     if taint.untrusted_input && policy.deny_untrusted_egress {
         return EgressDecision::DenyUntrustedTaint;
     }
-    if !policy.allowed_domains.is_empty() {
+    if policy.allowed_domains.is_empty() && policy.allowed_cidrs.is_empty() {
+        return EgressDecision::DenyUnattributedDestination;
+    }
+    {
         let attributed_domain = destination.domain.filter(|domain| {
             destination.dns_observed
                 && destination.ttl_valid
                 && destination.same_execution_domain
                 && policy.allowed_domains.contains(domain)
         });
-        if attributed_domain.is_none() {
+        let cidr_allowed = destination.ip.is_some_and(|ip| {
+            policy
+                .allowed_cidrs
+                .iter()
+                .any(|cidr| cidr_contains(cidr, ip))
+        });
+        if attributed_domain.is_none() && !cidr_allowed {
             return EgressDecision::DenyUnattributedDestination;
         }
     }
     EgressDecision::Allow
+}
+
+fn cidr_contains(cidr: &str, ip: IpAddr) -> bool {
+    let Some((network, prefix)) = cidr.split_once('/') else {
+        return false;
+    };
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    match (network.parse::<IpAddr>(), ip) {
+        (Ok(IpAddr::V4(network)), IpAddr::V4(ip)) if prefix <= 32 => {
+            let shift = 32 - u32::from(prefix);
+            u32::from(network) >> shift == u32::from(ip) >> shift
+        }
+        (Ok(IpAddr::V6(network)), IpAddr::V6(ip)) if prefix <= 128 => {
+            let shift = 128 - u32::from(prefix);
+            u128::from(network) >> shift == u128::from(ip) >> shift
+        }
+        _ => false,
+    }
 }
 
 #[must_use]
@@ -292,6 +326,7 @@ mod tests {
 
     fn destination(domain: Option<&str>, observed: bool, ttl_valid: bool) -> Destination<'_> {
         Destination {
+            ip: None,
             domain,
             dns_observed: observed,
             ttl_valid,
@@ -309,6 +344,7 @@ mod tests {
                 },
                 destination(Some(API), true, true),
                 EgressPolicy {
+                    allowed_cidrs: &[],
                     allowed_domains: &ALLOWED,
                     deny_untrusted_egress: false,
                 },
@@ -329,6 +365,7 @@ mod tests {
                 taint,
                 destination,
                 EgressPolicy {
+                    allowed_cidrs: &[],
                     allowed_domains: &ALLOWED,
                     deny_untrusted_egress: true,
                 }
@@ -340,6 +377,7 @@ mod tests {
                 taint,
                 destination,
                 EgressPolicy {
+                    allowed_cidrs: &[],
                     allowed_domains: &ALLOWED,
                     deny_untrusted_egress: false,
                 }
@@ -351,6 +389,7 @@ mod tests {
     #[test]
     fn direct_or_expired_resolution_is_rejected() {
         let policy = EgressPolicy {
+            allowed_cidrs: &[],
             allowed_domains: &ALLOWED,
             deny_untrusted_egress: false,
         };

@@ -200,6 +200,7 @@ fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {
             untrusted_input: false,
         },
         Destination {
+            ip: None,
             domain: Some(&domain),
             dns_observed: true,
             ttl_valid: true,

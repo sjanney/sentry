@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-use std::{collections::BTreeSet, sync::RwLock};
+use std::{collections::BTreeSet, net::IpAddr, sync::RwLock};
 
 use crate::{Destination, EgressDecision, EgressPolicy, TaintMask, decide_egress};
 
@@ -40,6 +40,8 @@ pub enum PolicyCompileError {
     NonDenyDefault,
     ZeroPolicyVersion,
     EmptyDomain,
+    InvalidDomain { domain: String },
+    InvalidCidr { cidr: String },
     TooManyDomains { limit: usize, found: usize },
     TooManyCidrs { limit: usize, found: usize },
     PolicyTooLarge { limit: usize, found: usize },
@@ -97,8 +99,20 @@ pub fn compile_kernel_policy(
     if policy.policy_version == 0 {
         return Err(PolicyCompileError::ZeroPolicyVersion);
     }
-    if policy.allowed_domains.iter().any(String::is_empty) {
-        return Err(PolicyCompileError::EmptyDomain);
+    for domain in &policy.allowed_domains {
+        if domain.is_empty() {
+            return Err(PolicyCompileError::EmptyDomain);
+        }
+        if domain.bytes().any(|byte| byte.is_ascii_control()) {
+            return Err(PolicyCompileError::InvalidDomain {
+                domain: domain.clone(),
+            });
+        }
+    }
+    for cidr in &policy.allowed_cidrs {
+        if !is_valid_cidr(cidr) {
+            return Err(PolicyCompileError::InvalidCidr { cidr: cidr.clone() });
+        }
     }
     if policy.allowed_domains.len() > limits.max_domains {
         return Err(PolicyCompileError::TooManyDomains {
@@ -112,11 +126,16 @@ pub fn compile_kernel_policy(
             found: policy.allowed_cidrs.len(),
         });
     }
-    for capability in &policy.required_capabilities {
-        if !available.contains(capability) {
-            return Err(PolicyCompileError::MissingCapability {
-                capability: *capability,
-            });
+    let mut required_capabilities = policy.required_capabilities.clone();
+    if policy.mode == PolicyMode::Enforce {
+        required_capabilities.insert(KernelCapability::CgroupV2);
+    }
+    if !policy.allowed_domains.is_empty() {
+        required_capabilities.insert(KernelCapability::DnsObservation);
+    }
+    for capability in required_capabilities {
+        if !available.contains(&capability) {
+            return Err(PolicyCompileError::MissingCapability { capability });
         }
     }
     let serialized_bytes = policy
@@ -147,11 +166,13 @@ impl CompiledKernelPolicy {
     #[must_use]
     pub fn decide_egress(&self, taint: TaintMask, destination: Destination<'_>) -> EgressDecision {
         let allowed_domains: Vec<_> = self.domain_slots.iter().map(String::as_str).collect();
+        let allowed_cidrs: Vec<_> = self.cidr_slots.iter().map(String::as_str).collect();
         decide_egress(
             taint,
             destination,
             EgressPolicy {
                 allowed_domains: &allowed_domains,
+                allowed_cidrs: &allowed_cidrs,
                 deny_untrusted_egress: true,
             },
         )
@@ -232,6 +253,7 @@ fn policy_hash(policy: &PolicySpec) -> u64 {
             PolicyMode::Enforce => 1,
         }],
     );
+    hash_bytes(&mut hash, b"capabilities");
     for capability in &policy.required_capabilities {
         hash_bytes(
             &mut hash,
@@ -242,10 +264,32 @@ fn policy_hash(policy: &PolicySpec) -> u64 {
             }],
         );
     }
-    for value in policy.allowed_domains.iter().chain(&policy.allowed_cidrs) {
+    hash_bytes(&mut hash, b"domains");
+    for value in &policy.allowed_domains {
+        hash_bytes(&mut hash, value.as_bytes());
+    }
+    hash_bytes(&mut hash, b"cidrs");
+    for value in &policy.allowed_cidrs {
         hash_bytes(&mut hash, value.as_bytes());
     }
     hash
+}
+
+fn is_valid_cidr(value: &str) -> bool {
+    let Some((address, prefix)) = value.split_once('/') else {
+        return false;
+    };
+    let Ok(address) = address.parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    prefix
+        <= match address {
+            IpAddr::V4(_) => 32,
+            IpAddr::V6(_) => 128,
+        }
 }
 
 fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
@@ -293,6 +337,7 @@ mod tests {
             compiled.decide_egress(
                 TaintMask::default(),
                 Destination {
+                    ip: None,
                     domain: Some("api.example.test"),
                     dns_observed: true,
                     ttl_valid: true,
@@ -329,6 +374,70 @@ mod tests {
     }
 
     #[test]
+    fn compiler_rejects_ambiguous_domains_and_invalid_cidrs() {
+        let capabilities = policy().required_capabilities.clone();
+        let mut spec = policy();
+        spec.allowed_domains = BTreeSet::from(["api\u{0}example.test".to_owned()]);
+        assert_eq!(
+            compile_kernel_policy(&spec, &capabilities, limits()),
+            Err(PolicyCompileError::InvalidDomain {
+                domain: "api\u{0}example.test".to_owned()
+            })
+        );
+        spec.allowed_domains.clear();
+        spec.allowed_cidrs = BTreeSet::from(["198.51.100.7/40".to_owned()]);
+        assert_eq!(
+            compile_kernel_policy(&spec, &capabilities, limits()),
+            Err(PolicyCompileError::InvalidCidr {
+                cidr: "198.51.100.7/40".to_owned()
+            })
+        );
+        spec.allowed_cidrs =
+            BTreeSet::from(["198.51.100.0/24".to_owned(), "2001:db8::/32".to_owned()]);
+        assert!(compile_kernel_policy(&spec, &capabilities, limits()).is_ok());
+    }
+
+    #[test]
+    fn cidr_only_policies_deny_unmatched_destinations() {
+        let mut spec = policy();
+        spec.allowed_domains.clear();
+        spec.allowed_cidrs = BTreeSet::from(["198.51.100.0/24".to_owned()]);
+        let compiled = compile_kernel_policy(&spec, &spec.required_capabilities, limits()).unwrap();
+        let allowed = Destination {
+            ip: Some("198.51.100.7".parse().unwrap()),
+            domain: None,
+            dns_observed: false,
+            ttl_valid: false,
+            same_execution_domain: false,
+        };
+        let denied = Destination {
+            ip: Some("203.0.113.7".parse().unwrap()),
+            ..allowed
+        };
+        assert_eq!(
+            compiled.decide_egress(TaintMask::default(), allowed),
+            EgressDecision::Allow
+        );
+        assert_eq!(
+            compiled.decide_egress(TaintMask::default(), denied),
+            EgressDecision::DenyUnattributedDestination
+        );
+    }
+
+    #[test]
+    fn enforced_policies_require_cgroup_capability_even_when_omitted() {
+        let mut spec = policy();
+        spec.allowed_domains.clear();
+        spec.required_capabilities.clear();
+        assert_eq!(
+            compile_kernel_policy(&spec, &BTreeSet::new(), limits()),
+            Err(PolicyCompileError::MissingCapability {
+                capability: KernelCapability::CgroupV2
+            })
+        );
+    }
+
+    #[test]
     fn activation_replaces_only_complete_compiled_policy() {
         let activation = PolicyActivation::new();
         assert_eq!(activation.active(), None);
@@ -343,6 +452,7 @@ mod tests {
         let spec = policy();
         let compiled = compile_kernel_policy(&spec, &spec.required_capabilities, limits()).unwrap();
         let destination = Destination {
+            ip: None,
             domain: Some("api.example.test"),
             dns_observed: true,
             ttl_valid: true,
