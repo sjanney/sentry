@@ -85,13 +85,13 @@ impl ExecutionAttestation {
             "v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.policy_hash,
             self.policy_revision,
-            self.policy_mode,
-            self.enforcement_path,
-            self.kernel_version,
-            self.architecture,
-            self.capability_fingerprint,
-            self.execution_domain_id,
-            self.process_tree_id,
+            hex(self.policy_mode.as_bytes()),
+            hex(self.enforcement_path.as_bytes()),
+            hex(self.kernel_version.as_bytes()),
+            hex(self.architecture.as_bytes()),
+            hex(self.capability_fingerprint.as_bytes()),
+            hex(self.execution_domain_id.as_bytes()),
+            hex(self.process_tree_id.as_bytes()),
             self.first_event_sequence,
             self.last_event_sequence,
             self.event_sequences
@@ -104,7 +104,7 @@ impl ExecutionAttestation {
             self.credential_class_decision_count,
             self.network_decision_count,
             self.dns_decision_count,
-            self.workflow_result,
+            hex(self.workflow_result.as_bytes()),
             self.partial_coverage,
             self.unsupported_guarantees,
             self.enforcement_available,
@@ -113,6 +113,16 @@ impl ExecutionAttestation {
         )
         .into_bytes()
     }
+}
+
+fn hex(input: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(input.len() * 2);
+    for byte in input {
+        output.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        output.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    output
 }
 
 #[cfg(test)]
@@ -188,5 +198,13 @@ mod tests {
             attestation.verify(&attestation.digest()),
             Err(AttestationError::InvalidSequence)
         );
+    }
+
+    #[test]
+    fn delimiter_characters_have_unambiguous_canonical_encoding() {
+        let first = complete();
+        let mut second = complete();
+        second.policy_mode = "enforce|bpf".to_owned();
+        assert_ne!(first.digest(), second.digest());
     }
 }
