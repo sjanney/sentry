@@ -21,3 +21,13 @@ The runner currently measures only the Linux command wrapper. Its JSON marks
 observe, dry-run, enforce, and audit as unsupported and keeps the release gate
 open. Do not use its CPU figure to claim the <2% enforcement target until the
 live modes are wired and measured under the declared matrix.
+
+## Initial Linux container evidence
+
+[`artifacts/overhead-baseline-linux-docker.json`](../../artifacts/overhead-baseline-linux-docker.json)
+records the first reproducible Linux run on 2026-09-12: Docker Desktop's
+Linux 6.12.54 VM on `aarch64`, Python 3.11.2, five warmups, and 20 repeats.
+The 50,000-`stat` wrapper workload measured 0.95% mean child-CPU overhead;
+the process-start workload measured 361.45%, where wrapper startup dominates
+the very short baseline. These numbers are raw command-wrapper evidence only;
+they do not pass or fail the enforcement release gate, which remains open.
