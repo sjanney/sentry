@@ -27,8 +27,10 @@ remains the security regression; it validates fixtures and the controlled sink
 but does not substitute for a real-agent result.
 
 `verify_real_agent_record.py` validates the required metadata and three-trial
-shape before results are attached. The checked-in example is a schema example
-only; it does not claim that an agent trial has run.
+shape before results are attached. It also requires the record to enumerate all
+four egress paths, so a partial trial cannot be mistaken for full coverage.
+The checked-in example is a schema example only; it does not claim that an
+agent trial has run.
 
 The current repository cannot run steps 2 or 3: CLI launch, kernel policy map
 activation, live event ingestion, and audit-log emission are not wired together.
