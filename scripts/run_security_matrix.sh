@@ -23,7 +23,7 @@ fi
   echo '## Coverage cells'
   echo '| cell | status | reason |'
   echo '|---|---|---|'
-  echo '| native kernel probes | running | BPF LSM, cgroup, and seccomp checks below |'
+  echo '| container kernel probes | running | BPF LSM, cgroup, and seccomp checks below |'
   echo '| launch enforcement | unsupported | CLI launch is not wired to policy maps |'
   echo '| attach enforcement | unsupported | attach path is observation-only |'
   echo '| adversarial workload | unsupported | live event ingestion and audit emission are not wired |'
@@ -34,7 +34,7 @@ fi
     SENTRY_EXPECT_ARCH="$expected_arch" bash tests/vm/kernel-capabilities/probe-linux-container.sh
     echo "container $expected_arch cell: passed"
   else
-    echo "unsupported native architecture: $machine"
+    echo "unsupported runner architecture: $machine"
     exit 2
   fi
 } | tee "$output"
