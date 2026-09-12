@@ -180,6 +180,7 @@ fn dry_run(arguments: &[String]) -> Result<CommandOutcome, String> {
         policy_version: 1,
         mode: PolicyMode::DryRun,
         default_deny: true,
+        deny_untrusted_egress: true,
         allowed_domains: BTreeSet::from([allowed]),
         allowed_cidrs: BTreeSet::new(),
         required_capabilities: capabilities.clone(),

@@ -22,6 +22,7 @@ pub struct PolicySpec {
     pub policy_version: u64,
     pub mode: PolicyMode,
     pub default_deny: bool,
+    pub deny_untrusted_egress: bool,
     pub allowed_domains: BTreeSet<String>,
     pub allowed_cidrs: BTreeSet<String>,
     pub required_capabilities: BTreeSet<KernelCapability>,
@@ -54,6 +55,7 @@ pub struct CompiledKernelPolicy {
     pub policy_hash: u64,
     pub mode: PolicyMode,
     pub default_deny: bool,
+    deny_untrusted_egress: bool,
     pub domain_slots: Vec<String>,
     pub cidr_slots: Vec<String>,
 }
@@ -157,6 +159,7 @@ pub fn compile_kernel_policy(
         policy_hash: policy_hash(policy),
         mode: policy.mode,
         default_deny: policy.default_deny,
+        deny_untrusted_egress: policy.deny_untrusted_egress,
         domain_slots,
         cidr_slots,
     })
@@ -173,7 +176,7 @@ impl CompiledKernelPolicy {
             EgressPolicy {
                 allowed_domains: &allowed_domains,
                 allowed_cidrs: &allowed_cidrs,
-                deny_untrusted_egress: true,
+                deny_untrusted_egress: self.deny_untrusted_egress,
             },
         )
     }
@@ -246,6 +249,7 @@ fn policy_hash(policy: &PolicySpec) -> u64 {
     hash_bytes(&mut hash, &policy.schema_version.to_le_bytes());
     hash_bytes(&mut hash, &policy.policy_version.to_le_bytes());
     hash_bytes(&mut hash, &[u8::from(policy.default_deny)]);
+    hash_bytes(&mut hash, &[u8::from(policy.deny_untrusted_egress)]);
     hash_bytes(
         &mut hash,
         &[match policy.mode {
@@ -309,6 +313,7 @@ mod tests {
             policy_version: 4,
             mode: PolicyMode::Enforce,
             default_deny: true,
+            deny_untrusted_egress: false,
             allowed_domains: BTreeSet::from(["api.example.test".to_owned()]),
             allowed_cidrs: BTreeSet::new(),
             required_capabilities: BTreeSet::from([
