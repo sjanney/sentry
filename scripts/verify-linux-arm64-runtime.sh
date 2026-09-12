@@ -7,5 +7,5 @@ if [ "$(docker info --format '{{.Architecture}}')" != "aarch64" ]; then
   exit 2
 fi
 
-bash tests/vm/toolchain-spike/run-arm64-container-probe.sh
-bash tests/vm/kernel-capabilities/probe-linux-container.sh
+SENTRY_EXPECT_ARCH=aarch64 bash tests/vm/toolchain-spike/run-arm64-container-probe.sh
+SENTRY_EXPECT_ARCH=aarch64 bash tests/vm/kernel-capabilities/probe-linux-container.sh

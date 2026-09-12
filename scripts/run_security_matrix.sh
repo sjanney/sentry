@@ -6,6 +6,10 @@ output=${SENTRY_MATRIX_OUTPUT:-artifacts/security-matrix-$(uname -m).md}
 mkdir -p "$(dirname "$output")"
 machine=$(uname -m)
 kernel=$(uname -r)
+expected_arch=$machine
+if [[ "$expected_arch" == 'arm64' ]]; then
+  expected_arch=aarch64
+fi
 {
   echo '# Native security matrix result'
   echo
@@ -25,7 +29,7 @@ kernel=$(uname -r)
   echo
   echo '## Result'
   if [[ "$machine" == 'aarch64' || "$machine" == 'arm64' || "$machine" == 'x86_64' ]]; then
-    bash tests/vm/kernel-capabilities/probe-linux-container.sh
+    SENTRY_EXPECT_ARCH="$expected_arch" bash tests/vm/kernel-capabilities/probe-linux-container.sh
     echo "native $machine cell: passed"
   else
     echo "unsupported native architecture: $machine"
