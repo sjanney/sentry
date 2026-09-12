@@ -22,4 +22,5 @@ an end-to-end enforcement audit claim.
 
 `scripts/verify_audit_log.py` is an independent Python verifier for complete
 files. It accepts a log path and reports sequence or hash corruption without
-using the Rust parser.
+using the Rust parser. For a rotated file, pass the predecessor sequence and
+64-character SHA-256 checkpoint hash as the second and third arguments.

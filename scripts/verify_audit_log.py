@@ -6,11 +6,20 @@ from pathlib import Path
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: verify_audit_log.py PATH", file=sys.stderr)
+    if len(sys.argv) not in (2, 4):
+        print(
+            "usage: verify_audit_log.py PATH [CHECKPOINT_SEQUENCE CHECKPOINT_SHA256]",
+            file=sys.stderr,
+        )
         return 2
-    previous = "00" * 32
-    sequence = 0
+    if len(sys.argv) == 4:
+        sequence = int(sys.argv[2])
+        previous = sys.argv[3].lower()
+        if len(previous) != 64 or any(c not in "0123456789abcdef" for c in previous):
+            raise ValueError("checkpoint hash must be 64 lowercase hexadecimal characters")
+    else:
+        previous = "00" * 32
+        sequence = 0
     for number, line in enumerate(Path(sys.argv[1]).read_text(encoding="utf-8").splitlines(), 1):
         fields = line.split("|")
         if len(fields) != 10 or fields[0] != "v1":
