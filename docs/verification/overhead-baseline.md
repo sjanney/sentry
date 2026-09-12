@@ -10,8 +10,11 @@ Run `cargo build --release -p sentry-cli` and then
 uses five warmups and 20 repeats for process-start and 50,000 `stat` syscalls.
 It writes raw per-repeat CPU and wall-clock samples, mean, standard deviation,
 p95 values and p95 baseline-to-Sentry deltas for tail latency, gate result,
-kernel/machine/Python metadata, and schema version to
+kernel/machine/Python/build-revision metadata, and schema version to
 `artifacts/overhead-baseline.json` (or `SENTRY_BENCHMARK_OUTPUT`).
+
+Set `SENTRY_BUILD_REVISION` to the exact source or image revision when running
+the benchmark so the raw artifact is traceable to the tested build.
 
 This repository is currently being developed from macOS, where the sensor CLI
 intentionally reports an unsupported host. No Linux baseline result is checked
