@@ -12,6 +12,9 @@ pub struct KernelPreflight {
     pub cgroup_v2_available: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MissingCapability(pub KernelCapability);
+
 impl KernelPreflight {
     /// Inspects a Linux sysfs root without claiming that a program has attached.
     #[must_use]
@@ -46,6 +49,20 @@ impl KernelPreflight {
             capabilities.insert(KernelCapability::CgroupV2);
         }
         capabilities
+    }
+
+    /// Checks that every requested policy capability was observed in preflight.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first missing capability in deterministic enum order.
+    pub fn require(&self, required: &BTreeSet<KernelCapability>) -> Result<(), MissingCapability> {
+        let available = self.available_capabilities();
+        required
+            .iter()
+            .find(|capability| !available.contains(capability))
+            .copied()
+            .map_or(Ok(()), |capability| Err(MissingCapability(capability)))
     }
 }
 
@@ -138,5 +155,19 @@ mod tests {
         fs::create_dir_all(root.join("sys/fs/cgroup/cgroup.controllers")).unwrap();
         assert!(!KernelPreflight::inspect(&root).cgroup_v2_available);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn require_reports_missing_capability_before_activation() {
+        let preflight = KernelPreflight {
+            btf_readable: true,
+            bpf_lsm_active: true,
+            cgroup_v2_available: false,
+        };
+        let required = BTreeSet::from([KernelCapability::BpfLsm, KernelCapability::CgroupV2]);
+        assert_eq!(
+            preflight.require(&required),
+            Err(MissingCapability(KernelCapability::CgroupV2))
+        );
     }
 }
