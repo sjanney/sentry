@@ -80,6 +80,11 @@ candidate fixes `mode` to `dry_run`, `default_action` to `deny`, and
 approved candidate. Incomplete and untrusted runs appear only as excluded
 issues, so their observations do not appear as proposed grants.
 
+When runtime evidence is available, `render_policy_candidate_with_context`
+also records the tested kernel version, architecture, and enforcement mode in
+the candidate header. The context remains descriptive; it cannot activate the
+candidate or turn incomplete replay evidence into a pass.
+
 ## Bounded compilation and activation
 
 Before activation, policy compilation rejects unsupported schema versions,
