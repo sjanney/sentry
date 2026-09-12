@@ -354,6 +354,32 @@ mod tests {
     }
 
     #[test]
+    fn secret_taint_overrides_an_explicit_cidr_allow() {
+        let allowed_cidrs = ["198.51.100.0/24"];
+        assert_eq!(
+            decide_egress(
+                TaintMask {
+                    secret: true,
+                    untrusted_input: false,
+                },
+                Destination {
+                    ip: Some("198.51.100.7".parse().unwrap()),
+                    domain: None,
+                    dns_observed: false,
+                    ttl_valid: false,
+                    same_execution_domain: false,
+                },
+                EgressPolicy {
+                    allowed_domains: &[],
+                    allowed_cidrs: &allowed_cidrs,
+                    deny_untrusted_egress: false,
+                },
+            ),
+            EgressDecision::DenySecretTaint
+        );
+    }
+
+    #[test]
     fn untrusted_taint_is_policy_controlled() {
         let taint = TaintMask {
             secret: false,
