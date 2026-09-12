@@ -11,8 +11,8 @@ Status: **not a demo candidate**. This checklist is a release-blocker record.
 | Enforce | Native arm64 BPF LSM/cgroup/seccomp hook probes | Partial: no live policy map/CLI path |
 | Verify | CLI SHA-256 audit verification and Python verifier | Partial: no live kernel event emission |
 
-The host-safe suite, policy fixtures, adversarial corpus, and native arm64 hook
-probe pass. The native x86_64 probe is implemented but has not yet produced
+The host-safe suite, policy fixtures, adversarial corpus, and arm64 Docker hook
+probe pass. The x86_64 probe is implemented but has not yet produced
 runtime evidence on an x86_64 kernel. The performance artifact keeps the <2%
 gate open because live observe, dry-run, enforce, and audit modes are not
 measured.
@@ -24,9 +24,10 @@ wiring and matrix cells. No deferred product features are included.
 
 ## Current reproducible evidence
 
-- Host-safe checks: `scripts/verify.sh` on commit `beef26e`.
-- Native arm64 hook probes: `tests/vm/kernel-capabilities/probe-linux-container.sh`
-  on Docker Desktop Linux 6.12.54 (`aarch64`).
+- Host-safe checks: `scripts/verify.sh` on the current `main` commit.
+- Arm64 Docker hook probes: `tests/vm/kernel-capabilities/probe-linux-container.sh`
+  on Docker Desktop Linux 6.12.54 (`aarch64`), with an explicit architecture
+  guard.
 - Wrapper benchmark artifact:
   `artifacts/overhead-baseline-linux-docker.json` (schema v1, five warmups,
   20 repetitions, raw samples and p95 deltas).
