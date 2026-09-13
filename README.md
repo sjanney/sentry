@@ -104,6 +104,7 @@ See the [security matrix](docs/verification/security-matrix.md),
 [procurement requirements matrix](docs/verification/procurement-requirements-matrix.md),
 [non-TEE Linux profile](docs/verification/non-tee-linux-profile.md),
 [TRACE governance conclusion](docs/verification/trace-governance-conclusion.md),
+[competitor benchmark protocol](docs/verification/competitor-benchmark-protocol.md),
 [attestation contract](docs/verification/attestation.md), and
 [real-agent protocol](docs/verification/real-agent-exfiltration-protocol.md)
 for the remaining release gates.

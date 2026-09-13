@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "sentry-non-tee-linux-baseline",
+  "recorded_at": "2026-09-13T00:00:00Z",
+  "environment": {
+    "kernel_version": "not_run",
+    "architecture": "not_run",
+    "enforcement_mode": "not_run"
+  },
+  "tools": [
+    {
+      "name": "sentry",
+      "version": "0.1.0",
+      "supported_environment": "self_hosted_linux",
+      "status": "not_run",
+      "reason": "live CLI-to-kernel enforcement and event ingestion are not wired",
+      "results": null
+    },
+    {
+      "name": "protocol_boundary_recorder",
+      "version": "not_selected",
+      "supported_environment": "selected_protocol_gateway",
+      "status": "not_run",
+      "reason": "a concrete baseline and supported deployment are required",
+      "results": null
+    }
+  ],
+  "scenarios": [
+    "normal_dependency_install",
+    "private_repository_access",
+    "build_and_test",
+    "synthetic_credential_read",
+    "direct_ip_exfiltration",
+    "dns_rebinding_or_expiry",
+    "parser_differential_hostname",
+    "proxy_use",
+    "inherited_socket",
+    "fork_exec_race",
+    "daemon_failure",
+    "event_buffer_exhaustion",
+    "policy_update_or_permission_request",
+    "mcp_a2a_tool_call",
+    "shelled_cli",
+    "improvised_http",
+    "agent_authored_script"
+  ],
+  "conclusion": "not_demonstrated"
+}
