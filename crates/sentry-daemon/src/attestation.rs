@@ -101,6 +101,16 @@ pub enum AttestationError {
     IntegrityMismatch,
 }
 
+/// The strongest statement a verified Sentry evidence record may make.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AttestationClaim {
+    /// Evidence is structurally valid and digest-verified, but its collection
+    /// or enforcement conditions do not support a protection claim.
+    ObservedEvidence,
+    /// Evidence also satisfies all current completeness and enforcement gates.
+    Protected,
+}
+
 impl ExecutionAttestation {
     /// Returns the canonical SHA-256 identity of this redacted envelope.
     #[must_use]
@@ -132,12 +142,14 @@ impl ExecutionAttestation {
         serde_json::from_str(input)
     }
 
-    /// Verifies that the attestation is complete enough to claim protection.
+    /// Verifies that the evidence record is structurally complete and untampered.
     ///
     /// # Errors
     ///
-    /// Returns an error when event ordering is invalid, evidence is incomplete,
-    /// or the supplied digest does not match the canonical envelope.
+    /// Returns an error when event ordering or path evidence is invalid, a
+    /// sensitive field is present, or the supplied digest does not match the
+    /// canonical envelope. An observe-mode record may pass this check while
+    /// remaining ineligible for a protection claim.
     pub fn verify(&self, expected_digest: &[u8; 32]) -> Result<(), AttestationError> {
         self.validate_redaction()?;
         self.validate_egress_path_evidence()?;
@@ -153,6 +165,17 @@ impl ExecutionAttestation {
         {
             return Err(AttestationError::InvalidSequence);
         }
+        if &self.digest() != expected_digest {
+            return Err(AttestationError::IntegrityMismatch);
+        }
+        Ok(())
+    }
+
+    /// Returns the strongest claim permitted after successful evidence
+    /// verification. This does not make a record authentic; callers must run
+    /// `verify` with its expected digest first.
+    #[must_use]
+    pub fn claim(&self) -> AttestationClaim {
         if self.event_loss_count != 0
             || self.partial_coverage
             || self.unsupported_guarantees
@@ -164,10 +187,25 @@ impl ExecutionAttestation {
                 .iter()
                 .any(|evidence| evidence.coverage != EgressPathCoverage::Full)
         {
-            return Err(AttestationError::IncompleteEvidence);
+            AttestationClaim::ObservedEvidence
+        } else {
+            AttestationClaim::Protected
         }
-        if &self.digest() != expected_digest {
-            return Err(AttestationError::IntegrityMismatch);
+    }
+
+    /// Verifies the evidence and requires the stronger protection claim.
+    ///
+    /// # Errors
+    ///
+    /// Returns `IncompleteEvidence` when a valid record has only observation
+    /// strength, or propagates evidence-validation failures from `verify`.
+    pub fn verify_protection_claim(
+        &self,
+        expected_digest: &[u8; 32],
+    ) -> Result<(), AttestationError> {
+        self.verify(expected_digest)?;
+        if self.claim() != AttestationClaim::Protected {
+            return Err(AttestationError::IncompleteEvidence);
         }
         Ok(())
     }
@@ -423,13 +461,14 @@ mod tests {
         let mut attestation = complete();
         attestation.event_loss_count = 1;
         assert_eq!(
-            attestation.verify(&attestation.digest()),
+            attestation.verify_protection_claim(&attestation.digest()),
             Err(AttestationError::IncompleteEvidence)
         );
+        assert_eq!(attestation.claim(), AttestationClaim::ObservedEvidence);
         attestation.event_loss_count = 0;
         attestation.partial_coverage = true;
         assert_eq!(
-            attestation.verify(&attestation.digest()),
+            attestation.verify_protection_claim(&attestation.digest()),
             Err(AttestationError::IncompleteEvidence)
         );
     }
@@ -449,7 +488,7 @@ mod tests {
         let mut partial = attestation;
         partial.egress_path_evidence[3].coverage = EgressPathCoverage::Partial;
         assert_eq!(
-            partial.verify(&partial.digest()),
+            partial.verify_protection_claim(&partial.digest()),
             Err(AttestationError::IncompleteEvidence)
         );
 
@@ -479,6 +518,20 @@ mod tests {
         assert_eq!(
             attestation.verify(&attestation.digest()),
             Err(AttestationError::InvalidSequence)
+        );
+    }
+
+    #[test]
+    fn observe_only_evidence_verifies_without_claiming_protection() {
+        let mut attestation = complete();
+        attestation.policy_mode = "observe".to_owned();
+        attestation.enforcement_available = false;
+        let digest = attestation.digest();
+        assert_eq!(attestation.verify(&digest), Ok(()));
+        assert_eq!(attestation.claim(), AttestationClaim::ObservedEvidence);
+        assert_eq!(
+            attestation.verify_protection_claim(&digest),
+            Err(AttestationError::IncompleteEvidence)
         );
     }
 

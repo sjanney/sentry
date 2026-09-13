@@ -2,9 +2,10 @@
 
 `sentry-daemon::attestation::ExecutionAttestation` hashes a canonical,
 redacted set of policy, environment, process-tree, event, decision, workflow,
-and verifier fields, including the complete ordered event sequence. `verify` rejects event loss, partial coverage, unsupported
-guarantees, unavailable enforcement, failed verification, invalid ordering, or
-tampering with the expected digest.
+and verifier fields, including the complete ordered event sequence. `verify`
+rejects invalid ordering, malformed path evidence, sensitive fields, or
+tampering with the expected digest. It separately reports the strongest claim
+the validated evidence can support.
 
 The envelope stores identifiers and counts only; it has no credential paths,
 secret contents, tokens, or payloads. It is independently verifiable with the
@@ -12,6 +13,13 @@ same canonical field encoding exposed by the read-only `canonical_bytes()`
 method. Live collection from kernel events and signing
 by a trusted runtime are still required before this primitive can support the
 complete release attestation.
+
+`claim()` returns `ObservedEvidence` for a valid observe-only record, lost
+events, partial coverage, unsupported guarantees, unavailable enforcement,
+failed verification, unclassified connections, or a partial/unavailable egress
+path. `verify_protection_claim()` requires both valid evidence and
+`Protected`. This separation lets a verifier retain an authentic lower-trust
+record without mistaking it for proof that Sentry enforced protection.
 
 `verify_environment()` separately compares the recorded kernel version,
 architecture, and capability fingerprint with the verifier's current host.
