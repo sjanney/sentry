@@ -40,7 +40,7 @@ fn capture_exec(object_path: &Path, duration: Duration) -> Result<(), String> {
             total.redaction_rejected,
             total.sequence_exhausted,
         );
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     {

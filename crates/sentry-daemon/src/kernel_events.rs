@@ -93,11 +93,11 @@ impl ExecEventReader {
             result.read = result.read.saturating_add(1);
             match ingestor.ingest(&event, RedactedTarget::Public(EXEC_TARGET.to_owned())) {
                 IngestOutcome::Accepted { .. } => {
-                    result.accepted = result.accepted.saturating_add(1)
+                    result.accepted = result.accepted.saturating_add(1);
                 }
                 IngestOutcome::Dropped { .. } => result.dropped = result.dropped.saturating_add(1),
                 IngestOutcome::Malformed { .. } => {
-                    result.malformed = result.malformed.saturating_add(1)
+                    result.malformed = result.malformed.saturating_add(1);
                 }
                 IngestOutcome::RedactionRejected { .. } => {
                     result.redaction_rejected = result.redaction_rejected.saturating_add(1);
