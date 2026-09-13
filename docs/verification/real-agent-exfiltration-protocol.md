@@ -32,6 +32,17 @@ four egress paths, so a partial trial cannot be mistaken for full coverage.
 The checked-in example is a schema example only; it does not claim that an
 agent trial has run.
 
+When live attestation is available, its four ordered per-path records must
+state a `full`, `partial`, or `unavailable` coverage flag and reconcile their
+Sentry decision counts to the run's total network decisions. The MCP/A2A
+record may have a protocol-boundary transcript count; the CLI, improvised HTTP,
+and agent-authored-script records must have zero protocol-boundary count while
+retaining their Sentry-side count. Any connection outside the four common paths
+is counted as unclassified, so the taxonomy never asserts that it exhausts all
+agent behavior. Static-linked binaries, interpreters started before attach, and
+pre-existing sockets must remain `partial` or `unavailable` until collection
+evidence proves otherwise.
+
 The current repository cannot run steps 2 or 3: CLI launch, kernel policy map
 activation, live event ingestion, and audit-log emission are not wired together.
 This document intentionally leaves the evidence table empty until that runtime

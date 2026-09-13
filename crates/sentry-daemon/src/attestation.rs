@@ -4,6 +4,58 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// The common agent egress paths Sentry reports independently.
+///
+/// This taxonomy does not claim to be exhaustive. Connections outside these
+/// paths are counted separately as unclassified network decisions.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EgressPath {
+    McpA2aToolCall,
+    ShelledCli,
+    ImprovisedHttp,
+    AgentAuthoredScript,
+}
+
+impl EgressPath {
+    const ALL: [Self; 4] = [
+        Self::McpA2aToolCall,
+        Self::ShelledCli,
+        Self::ImprovisedHttp,
+        Self::AgentAuthoredScript,
+    ];
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::McpA2aToolCall => "mcp_a2a_tool_call",
+            Self::ShelledCli => "shelled_cli",
+            Self::ImprovisedHttp => "improvised_http",
+            Self::AgentAuthoredScript => "agent_authored_script",
+        }
+    }
+}
+
+/// Whether Sentry's evidence source could observe a path on this run's host.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EgressPathCoverage {
+    Full,
+    Partial,
+    Unavailable,
+}
+
+/// Redacted, per-path counts and coverage. Script contents and paths are never
+/// included; provenance for authored scripts belongs in a separate digest-only
+/// event record once live collection is wired.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EgressPathEvidence {
+    pub path: EgressPath,
+    pub coverage: EgressPathCoverage,
+    pub sentry_network_decision_count: u64,
+    pub mcp_boundary_record_count: u64,
+}
+
 // These independent flags are serialized evidence dimensions; collapsing
 // them would hide which specific completeness condition failed.
 #[allow(clippy::struct_excessive_bools)]
@@ -28,6 +80,8 @@ pub struct ExecutionAttestation {
     pub filesystem_decision_count: u64,
     pub credential_class_decision_count: u64,
     pub network_decision_count: u64,
+    pub egress_path_evidence: Vec<EgressPathEvidence>,
+    pub unclassified_network_decision_count: u64,
     pub dns_decision_count: u64,
     pub workflow_result: String,
     pub partial_coverage: bool,
@@ -40,6 +94,7 @@ pub struct ExecutionAttestation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AttestationError {
     InvalidSequence,
+    InvalidEgressPathEvidence,
     IncompleteEvidence,
     EnvironmentMismatch,
     SensitiveField,
@@ -85,6 +140,7 @@ impl ExecutionAttestation {
     /// or the supplied digest does not match the canonical envelope.
     pub fn verify(&self, expected_digest: &[u8; 32]) -> Result<(), AttestationError> {
         self.validate_redaction()?;
+        self.validate_egress_path_evidence()?;
         if self.last_event_sequence < self.first_event_sequence {
             return Err(AttestationError::InvalidSequence);
         }
@@ -102,6 +158,11 @@ impl ExecutionAttestation {
             || self.unsupported_guarantees
             || !self.enforcement_available
             || !self.verification_result
+            || self.unclassified_network_decision_count != 0
+            || self
+                .egress_path_evidence
+                .iter()
+                .any(|evidence| evidence.coverage != EgressPathCoverage::Full)
         {
             return Err(AttestationError::IncompleteEvidence);
         }
@@ -136,6 +197,49 @@ impl ExecutionAttestation {
                 .any(|byte| byte.is_ascii_control() || byte == b'/' || byte == b'\\')
         }) {
             return Err(AttestationError::SensitiveField);
+        }
+        Ok(())
+    }
+
+    /// Verifies that every common egress path has a distinct coverage flag and
+    /// that protocol-boundary records are never invented for non-protocol
+    /// paths. The four paths are deliberately not treated as exhaustive.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidEgressPathEvidence` for missing, reordered, duplicated,
+    /// or contradictory per-path records.
+    pub fn validate_egress_path_evidence(&self) -> Result<(), AttestationError> {
+        if self.egress_path_evidence.len() != EgressPath::ALL.len()
+            || self
+                .egress_path_evidence
+                .iter()
+                .zip(EgressPath::ALL)
+                .any(|(evidence, expected)| evidence.path != expected)
+        {
+            return Err(AttestationError::InvalidEgressPathEvidence);
+        }
+
+        let classified_count = self
+            .egress_path_evidence
+            .iter()
+            .try_fold(0_u64, |total, evidence| {
+                total.checked_add(evidence.sentry_network_decision_count)
+            });
+        if classified_count
+            .and_then(|count| count.checked_add(self.unclassified_network_decision_count))
+            != Some(self.network_decision_count)
+        {
+            return Err(AttestationError::InvalidEgressPathEvidence);
+        }
+
+        for evidence in &self.egress_path_evidence {
+            let protocol_path = evidence.path == EgressPath::McpA2aToolCall;
+            if (!protocol_path && evidence.mcp_boundary_record_count != 0)
+                || evidence.mcp_boundary_record_count > evidence.sentry_network_decision_count
+            {
+                return Err(AttestationError::InvalidEgressPathEvidence);
+            }
         }
         Ok(())
     }
@@ -180,7 +284,7 @@ impl ExecutionAttestation {
 
     fn canonical_encoding(&self) -> Vec<u8> {
         format!(
-            "v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "v2|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.policy_hash,
             self.policy_revision,
             hex(self.policy_mode.as_bytes()),
@@ -203,12 +307,28 @@ impl ExecutionAttestation {
             self.filesystem_decision_count,
             self.credential_class_decision_count,
             self.network_decision_count,
+            self.egress_path_evidence
+                .iter()
+                .map(|evidence| format!(
+                    "{}:{}:{}:{}",
+                    evidence.path.as_str(),
+                    match evidence.coverage {
+                        EgressPathCoverage::Full => "full",
+                        EgressPathCoverage::Partial => "partial",
+                        EgressPathCoverage::Unavailable => "unavailable",
+                    },
+                    evidence.sentry_network_decision_count,
+                    evidence.mcp_boundary_record_count,
+                ))
+                .collect::<Vec<_>>()
+                .join(","),
+            self.unclassified_network_decision_count,
             self.dns_decision_count,
             hex(self.workflow_result.as_bytes()),
             self.partial_coverage,
             self.unsupported_guarantees,
             self.enforcement_available,
-            self.verifier_version,
+            hex(self.verifier_version.as_bytes()),
             self.verification_result,
         )
         .into_bytes()
@@ -248,7 +368,34 @@ mod tests {
             event_loss_count: 0,
             filesystem_decision_count: 1,
             credential_class_decision_count: 1,
-            network_decision_count: 1,
+            network_decision_count: 4,
+            egress_path_evidence: vec![
+                EgressPathEvidence {
+                    path: EgressPath::McpA2aToolCall,
+                    coverage: EgressPathCoverage::Full,
+                    sentry_network_decision_count: 1,
+                    mcp_boundary_record_count: 1,
+                },
+                EgressPathEvidence {
+                    path: EgressPath::ShelledCli,
+                    coverage: EgressPathCoverage::Full,
+                    sentry_network_decision_count: 1,
+                    mcp_boundary_record_count: 0,
+                },
+                EgressPathEvidence {
+                    path: EgressPath::ImprovisedHttp,
+                    coverage: EgressPathCoverage::Full,
+                    sentry_network_decision_count: 1,
+                    mcp_boundary_record_count: 0,
+                },
+                EgressPathEvidence {
+                    path: EgressPath::AgentAuthoredScript,
+                    coverage: EgressPathCoverage::Full,
+                    sentry_network_decision_count: 1,
+                    mcp_boundary_record_count: 0,
+                },
+            ],
+            unclassified_network_decision_count: 0,
             dns_decision_count: 1,
             workflow_result: "passed".to_owned(),
             partial_coverage: false,
@@ -288,6 +435,34 @@ mod tests {
     }
 
     #[test]
+    fn path_evidence_distinguishes_protocol_from_kernel_observation() {
+        let attestation = complete();
+        assert_eq!(attestation.validate_egress_path_evidence(), Ok(()));
+
+        let mut invalid = attestation.clone();
+        invalid.egress_path_evidence[1].mcp_boundary_record_count = 1;
+        assert_eq!(
+            invalid.verify(&invalid.digest()),
+            Err(AttestationError::InvalidEgressPathEvidence)
+        );
+
+        let mut partial = attestation;
+        partial.egress_path_evidence[3].coverage = EgressPathCoverage::Partial;
+        assert_eq!(
+            partial.verify(&partial.digest()),
+            Err(AttestationError::IncompleteEvidence)
+        );
+
+        let mut overflow = complete();
+        overflow.egress_path_evidence[0].sentry_network_decision_count = u64::MAX;
+        overflow.egress_path_evidence[1].sentry_network_decision_count = 1;
+        assert_eq!(
+            overflow.verify(&overflow.digest()),
+            Err(AttestationError::InvalidEgressPathEvidence)
+        );
+    }
+
+    #[test]
     fn reordered_or_truncated_event_sequences_are_rejected() {
         let mut attestation = complete();
         attestation.event_sequences = vec![1, 3, 2, 4];
@@ -312,6 +487,9 @@ mod tests {
         let first = complete();
         let mut second = complete();
         second.policy_mode = "enforce|bpf".to_owned();
+        assert_ne!(first.digest(), second.digest());
+        second = first.clone();
+        second.verifier_version = "sentry|attestation-v1".to_owned();
         assert_ne!(first.digest(), second.digest());
     }
 
