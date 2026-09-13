@@ -1,4 +1,5 @@
 use libbpf_rs::{MapCore, ObjectBuilder, RingBufferBuilder, TracepointCategory};
+use sentry_types::{EVENT_HEADER_SIZE_U32, EventHeader, EventKind};
 use std::{cell::Cell, env, error::Error, process::Command, time::Duration};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -16,7 +17,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let received = Cell::new(false);
     let mut builder = RingBufferBuilder::new();
     builder.add(&events, |event| {
-        received.set(event.len() == 20);
+        received.set(matches!(
+            EventHeader::decode(event),
+            Ok(header) if header.kind == EventKind::Exec && header.event_size == EVENT_HEADER_SIZE_U32
+        ));
         0
     })?;
     let ring_buffer = builder.build()?;

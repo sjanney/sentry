@@ -5,8 +5,12 @@ tracepoint program reserves an event in a ring buffer. `aya-loader` loads that
 object through Aya and attaches it; `libbpf-rs-loader` does the same through
 libbpf-rs. They establish that the target kernel accepts a ring-buffer map and
 tracepoint attachment through each userspace API, trigger a fresh `exec`, and
-consume one fixed-size event. They do not read files, make network connections,
-or keep links after the container exits.
+consume one fixed-size event. The event is the exact 48-byte
+`sentry_types::EventHeader` ABI v1; both loaders strictly decode it and require
+an `Exec` kind before passing the probe. The probe supplies kernel timestamp
+and process identity only. Daemon-local sequencing, run attribution, and a
+redacted target label remain userspace responsibilities. It does not read
+files, make network connections, or keep links after the container exits.
 
 The probe prints both `kernel` and `arch` so each result is attributable to an
 explicit Linux architecture rather than inferred from the calling host.

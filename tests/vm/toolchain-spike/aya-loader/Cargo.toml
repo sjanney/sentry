@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 aya = "0.14.0"
+sentry-types = { path = "../../../../crates/sentry-types" }

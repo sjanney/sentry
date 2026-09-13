@@ -3,6 +3,7 @@ use aya::{
     maps::RingBuf,
     programs::TracePoint,
 };
+use sentry_types::{EVENT_HEADER_SIZE_U32, EventHeader, EventKind};
 use std::{env, error::Error, fs, process::Command, thread, time::Duration};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -23,8 +24,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     for _ in 0..100 {
         if let Some(event) = events.next() {
-            if event.len() != 20 {
-                return Err(format!("unexpected event size: {}", event.len()).into());
+            let header = EventHeader::decode(&event)
+                .map_err(|error| format!("invalid Sentry event header: {error:?}"))?;
+            if header.kind != EventKind::Exec || header.event_size != EVENT_HEADER_SIZE_U32 {
+                return Err("unexpected Sentry event header".into());
             }
             println!("Aya tracepoint load, attach, and ring-buffer consumption succeeded");
             return Ok(());
