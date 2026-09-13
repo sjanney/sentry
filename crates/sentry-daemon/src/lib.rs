@@ -36,19 +36,34 @@ impl RedactedTarget {
             None => Self::Public(value.to_owned()),
         }
     }
+
+    fn is_safe(&self) -> bool {
+        let value: &str = match self {
+            Self::Public(value) => value,
+            Self::Redacted { class } => class,
+        };
+        !value.is_empty()
+            && !value
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || byte == b'/' || byte == b'\\')
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IngestOutcome {
     Accepted { sequence: u64 },
     Dropped { total_dropped: u64 },
-    Malformed,
+    Malformed { total_malformed: u64 },
+    RedactionRejected { total_rejected: u64 },
+    SequenceExhausted,
 }
 
 pub struct EventIngestor {
     capacity: usize,
     next_sequence: u64,
     dropped: u64,
+    malformed: u64,
+    redaction_rejected: u64,
     events: VecDeque<NormalizedEvent>,
 }
 
@@ -59,19 +74,33 @@ impl EventIngestor {
             capacity,
             next_sequence: 1,
             dropped: 0,
+            malformed: 0,
+            redaction_rejected: 0,
             events: VecDeque::with_capacity(capacity),
         }
     }
 
     pub fn ingest(&mut self, bytes: &[u8], target: RedactedTarget) -> IngestOutcome {
         let Ok(mut header) = EventHeader::decode(bytes) else {
-            return IngestOutcome::Malformed;
+            self.malformed = self.malformed.saturating_add(1);
+            return IngestOutcome::Malformed {
+                total_malformed: self.malformed,
+            };
         };
+        if !target.is_safe() {
+            self.redaction_rejected = self.redaction_rejected.saturating_add(1);
+            return IngestOutcome::RedactionRejected {
+                total_rejected: self.redaction_rejected,
+            };
+        }
         if self.events.len() == self.capacity {
-            self.dropped += 1;
+            self.dropped = self.dropped.saturating_add(1);
             return IngestOutcome::Dropped {
                 total_dropped: self.dropped,
             };
+        }
+        if self.next_sequence == u64::MAX {
+            return IngestOutcome::SequenceExhausted;
         }
         header.sequence = self.next_sequence;
         self.next_sequence += 1;
@@ -79,6 +108,26 @@ impl EventIngestor {
         IngestOutcome::Accepted {
             sequence: header.sequence,
         }
+    }
+
+    #[must_use]
+    pub const fn dropped_count(&self) -> u64 {
+        self.dropped
+    }
+
+    #[must_use]
+    pub const fn malformed_count(&self) -> u64 {
+        self.malformed
+    }
+
+    #[must_use]
+    pub const fn redaction_rejected_count(&self) -> u64 {
+        self.redaction_rejected
+    }
+
+    #[must_use]
+    pub fn event_count(&self) -> usize {
+        self.events.len()
     }
 }
 
@@ -506,18 +555,19 @@ mod tests {
         assert_eq!(
             ingestor.ingest(
                 &encoded_exec(),
-                RedactedTarget::Public("src/main.rs".to_owned())
+                RedactedTarget::Public("source_file".to_owned())
             ),
             IngestOutcome::Accepted { sequence: 1 }
         );
         assert_eq!(
             ingestor.ingest(
                 &encoded_exec(),
-                RedactedTarget::Public("src/lib.rs".to_owned())
+                RedactedTarget::Public("source_library".to_owned())
             ),
             IngestOutcome::Dropped { total_dropped: 1 }
         );
-        assert_eq!(ingestor.events.len(), 1);
+        assert_eq!(ingestor.event_count(), 1);
+        assert_eq!(ingestor.dropped_count(), 1);
     }
 
     #[test]
@@ -525,7 +575,7 @@ mod tests {
         let mut ingestor = EventIngestor::new(1);
         assert_eq!(
             ingestor.ingest(&[], RedactedTarget::Public("ignored".to_owned())),
-            IngestOutcome::Malformed
+            IngestOutcome::Malformed { total_malformed: 1 }
         );
         assert_eq!(
             RedactedTarget::from_observation("/home/user/.aws/credentials", Some("credential")),
@@ -533,6 +583,14 @@ mod tests {
                 class: "credential"
             }
         );
+        assert_eq!(
+            ingestor.ingest(
+                &encoded_exec(),
+                RedactedTarget::Public("/home/user/.aws/credentials".to_owned())
+            ),
+            IngestOutcome::RedactionRejected { total_rejected: 1 }
+        );
+        assert_eq!(ingestor.redaction_rejected_count(), 1);
     }
 
     #[test]
@@ -543,7 +601,7 @@ mod tests {
                 &[0; EVENT_HEADER_SIZE - 1],
                 RedactedTarget::Public("bad".to_owned())
             ),
-            IngestOutcome::Malformed
+            IngestOutcome::Malformed { total_malformed: 1 }
         );
         assert_eq!(
             ingestor.ingest(&encoded_exec(), RedactedTarget::Public("ok".to_owned())),

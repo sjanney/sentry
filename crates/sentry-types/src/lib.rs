@@ -44,6 +44,8 @@ pub enum HeaderDecodeError {
     UnsupportedVersion,
     UnknownKind,
     InvalidLength,
+    InvalidFlags,
+    NonzeroReserved,
 }
 
 #[repr(C)]
@@ -125,9 +127,15 @@ impl EventHeader {
         }
         let event_size = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         if !(EVENT_HEADER_SIZE_U32..=MAX_EVENT_BYTES).contains(&event_size)
-            || event_size as usize > bytes.len()
+            || event_size as usize != bytes.len()
         {
             return Err(HeaderDecodeError::InvalidLength);
+        }
+        if bytes[3] != 0 {
+            return Err(HeaderDecodeError::InvalidFlags);
+        }
+        if read_u32(bytes, 44)? != 0 {
+            return Err(HeaderDecodeError::NonzeroReserved);
         }
         Ok(Self {
             version,
@@ -211,6 +219,24 @@ mod tests {
         );
         let mut bytes = header().encode();
         bytes[4..8].copy_from_slice(&(MAX_EVENT_BYTES + 1).to_le_bytes());
+        assert_eq!(
+            EventHeader::decode(&bytes),
+            Err(HeaderDecodeError::InvalidLength)
+        );
+        let mut bytes = header().encode();
+        bytes[3] = 1;
+        assert_eq!(
+            EventHeader::decode(&bytes),
+            Err(HeaderDecodeError::InvalidFlags)
+        );
+        let mut bytes = header().encode();
+        bytes[44..48].copy_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(
+            EventHeader::decode(&bytes),
+            Err(HeaderDecodeError::NonzeroReserved)
+        );
+        let mut bytes = header().encode().to_vec();
+        bytes.push(0);
         assert_eq!(
             EventHeader::decode(&bytes),
             Err(HeaderDecodeError::InvalidLength)
