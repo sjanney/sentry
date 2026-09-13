@@ -35,14 +35,15 @@ control, proxy or encrypted-DNS attribution, or prompt-injection prevention.
 
 ## Key and trust model
 
-The eventual signing key is software-rooted on the Linux host and must be
-provisioned through the deployment supervisor, kept outside event payloads,
-and rotated or revoked by that supervisor. A host compromise before or during
-the run can alter Sentry, its key, or the evidence path; this profile therefore
-cannot detect that compromise without a hardware root. The declared trust
-ceiling is evidence integrity against post-run tampering when the verifier
-trusts the software key and the recorded environment, not proof of host
-integrity or confidentiality.
+Sentry's attestation library supports a software-rooted Ed25519 signature. Its
+key must be provisioned through the deployment supervisor, kept outside event
+payloads, and rotated or revoked by that supervisor; the library does not
+manage that lifecycle. A host compromise before or during the run can alter
+Sentry, its key, or the evidence path; this profile therefore cannot detect
+that compromise without a hardware root. The declared trust ceiling is
+evidence integrity against post-run tampering when the verifier trusts the
+software key and the recorded environment, not proof of host integrity or
+confidentiality.
 
 ## Verification boundary
 

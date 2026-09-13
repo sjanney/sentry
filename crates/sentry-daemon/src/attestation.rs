@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Redacted, independently verifiable execution-attestation envelope.
 
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -99,6 +100,65 @@ pub enum AttestationError {
     EnvironmentMismatch,
     SensitiveField,
     IntegrityMismatch,
+    InvalidKeyId,
+    SignatureMismatch,
+}
+
+/// A software-rooted signature over a Sentry evidence record and its key ID.
+/// The key ID identifies a verifier-configured trust anchor; it is not a
+/// hardware attestation or a TRACE key proof.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttestationSignature {
+    pub key_id: String,
+    pub signature: Vec<u8>,
+}
+
+impl AttestationSignature {
+    /// Signs an evidence record with a software-rooted Ed25519 key.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidKeyId` if the key ID can carry a path or control data.
+    pub fn sign(
+        attestation: &ExecutionAttestation,
+        key_id: &str,
+        signing_key: &SigningKey,
+    ) -> Result<Self, AttestationError> {
+        validate_key_id(key_id)?;
+        Ok(Self {
+            key_id: key_id.to_owned(),
+            signature: signing_key
+                .sign(&signature_message(attestation, key_id))
+                .to_bytes()
+                .to_vec(),
+        })
+    }
+
+    /// Verifies the signature against the caller's expected trust-anchor ID
+    /// and Ed25519 public key.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidKeyId` for a malformed or substituted key ID and
+    /// `SignatureMismatch` for a malformed signature or wrong public key.
+    pub fn verify(
+        &self,
+        attestation: &ExecutionAttestation,
+        expected_key_id: &str,
+        verifying_key: &VerifyingKey,
+    ) -> Result<(), AttestationError> {
+        validate_key_id(&self.key_id)?;
+        validate_key_id(expected_key_id)?;
+        if self.key_id != expected_key_id {
+            return Err(AttestationError::InvalidKeyId);
+        }
+        let signature = Signature::from_slice(&self.signature)
+            .map_err(|_| AttestationError::SignatureMismatch)?;
+        verifying_key
+            .verify(&signature_message(attestation, &self.key_id), &signature)
+            .map_err(|_| AttestationError::SignatureMismatch)
+    }
 }
 
 /// The strongest statement a verified Sentry evidence record may make.
@@ -383,6 +443,25 @@ fn hex(input: &[u8]) -> String {
     output
 }
 
+fn validate_key_id(key_id: &str) -> Result<(), AttestationError> {
+    if key_id.is_empty()
+        || key_id.bytes().any(|byte| {
+            byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'/' || byte == b'\\'
+        })
+    {
+        return Err(AttestationError::InvalidKeyId);
+    }
+    Ok(())
+}
+
+fn signature_message(attestation: &ExecutionAttestation, key_id: &str) -> Vec<u8> {
+    let mut message = b"sentry-attestation-signature-v1\0".to_vec();
+    message.extend_from_slice(&(key_id.len() as u64).to_be_bytes());
+    message.extend_from_slice(key_id.as_bytes());
+    message.extend_from_slice(&attestation.canonical_bytes());
+    message
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,6 +611,34 @@ mod tests {
         assert_eq!(
             attestation.verify_protection_claim(&digest),
             Err(AttestationError::IncompleteEvidence)
+        );
+    }
+
+    #[test]
+    fn signatures_detect_forgery_and_key_substitution() {
+        let attestation = complete();
+        let signer = SigningKey::from_bytes(&[7; 32]);
+        let signature = AttestationSignature::sign(&attestation, "sentry-dev-1", &signer).unwrap();
+        assert_eq!(
+            signature.verify(&attestation, "sentry-dev-1", &signer.verifying_key()),
+            Ok(())
+        );
+
+        let mut forged = signature.clone();
+        forged.signature[0] ^= 1;
+        assert_eq!(
+            forged.verify(&attestation, "sentry-dev-1", &signer.verifying_key()),
+            Err(AttestationError::SignatureMismatch)
+        );
+
+        let other_signer = SigningKey::from_bytes(&[8; 32]);
+        assert_eq!(
+            signature.verify(&attestation, "sentry-dev-1", &other_signer.verifying_key()),
+            Err(AttestationError::SignatureMismatch)
+        );
+        assert_eq!(
+            signature.verify(&attestation, "sentry-dev-2", &signer.verifying_key()),
+            Err(AttestationError::InvalidKeyId)
         );
     }
 

@@ -21,6 +21,19 @@ path. `verify_protection_claim()` requires both valid evidence and
 `Protected`. This separation lets a verifier retain an authentic lower-trust
 record without mistaking it for proof that Sentry enforced protection.
 
+## Software-rooted signatures
+
+`AttestationSignature` signs the canonical evidence bytes with Ed25519 and a
+caller-provided, non-empty key ID. The verifier supplies both the expected key
+ID and an independently trusted public key; the signed message includes the
+key ID, so changing its label, the evidence, or the signature causes
+verification to fail. The current API deliberately does not create, store,
+rotate, or discover keys. Those duties remain with the deployment supervisor.
+
+This signature protects evidence integrity only to the extent that the
+verifier trusts the selected software key and host. It is not a silicon-rooted
+attestation, a key certificate, or a TRACE conformance artifact.
+
 `verify_environment()` separately compares the recorded kernel version,
 architecture, and capability fingerprint with the verifier's current host.
 `verify_process_identity()` compares the root TGID and procfs start-time ticks,
