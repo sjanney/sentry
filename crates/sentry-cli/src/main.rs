@@ -348,7 +348,22 @@ fn observe_command(arguments: &[String]) -> Result<CommandOutcome, String> {
         target_class: "command".to_owned(),
     })
     .map_err(|error| render_audit_error(&error))?;
-    let outcome = run_command(&remainder[2..]).map_err(|error| render_error(&error))?;
+    let outcome = match run_command(&remainder[2..]) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            log.append(&AuditEvent {
+                sequence: 2,
+                run_id,
+                policy_version: 0,
+                policy_hash: 0,
+                decision: "command_spawn_failed".to_owned(),
+                rule_id: None,
+                target_class: "command".to_owned(),
+            })
+            .map_err(|audit_error| render_audit_error(&audit_error))?;
+            return Err(render_error(&error));
+        }
+    };
     log.append(&AuditEvent {
         sequence: 2,
         run_id,

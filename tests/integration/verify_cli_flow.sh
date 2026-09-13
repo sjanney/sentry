@@ -69,6 +69,15 @@ if [[ $(uname -s) == Linux ]]; then
   cargo run -q -p sentry-cli -- observe --audit-log "$audit_log" -- sh -c 'exit 0'
   audit_result=$(cargo run -q -p sentry-cli -- audit verify "$audit_log")
   grep -Fq 'verified audit sequence 2' <<<"$audit_result"
+  failed_audit_log="$workdir/failed-audit.log"
+  if cargo run -q -p sentry-cli -- observe --audit-log "$failed_audit_log" -- \
+    /definitely/not/a/sentry-command; then
+    echo 'observe accepted a command that could not spawn' >&2
+    exit 1
+  fi
+  failed_audit_result=$(cargo run -q -p sentry-cli -- audit verify "$failed_audit_log")
+  grep -Fq 'verified audit sequence 2' <<<"$failed_audit_result"
+  grep -Fq '636f6d6d616e645f737061776e5f6661696c6564' "$failed_audit_log"
   if cargo run -q -p sentry-cli -- attach 1 unexpected; then
     echo 'attach accepted unexpected arguments' >&2
     exit 1
