@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Linux tracepoint collection for the Sentry event ABI.
 //!
-//! This module observes `sched_process_exec` through the MVP probe object. It
-//! deliberately does not load policy maps or make an enforcement claim.
+//! This module observes process exec, fork, and exit through the MVP probe
+//! object. It deliberately does not load policy maps or make an enforcement
+//! claim. Lifecycle observations are not applied to [`crate::ProcessTracker`]
+//! because this ABI does not yet carry the start-time identity needed to avoid
+//! PID reuse errors.
 
 use std::{error::Error, fmt, fs, path::Path};
 
@@ -11,10 +14,14 @@ use aya::{
     maps::{MapData, RingBuf},
     programs::TracePoint,
 };
+use sentry_types::{EventHeader, EventKind};
 
 use crate::{EventIngestor, IngestOutcome, RedactedTarget};
 
 const EXEC_TARGET: &str = "process_exec";
+const FORK_TARGET: &str = "process_fork";
+const EXIT_TARGET: &str = "process_exit";
+const UNKNOWN_TARGET: &str = "process_event";
 
 #[derive(Debug)]
 pub struct KernelEventError(String);
@@ -35,17 +42,20 @@ pub struct KernelDrain {
     pub malformed: u64,
     pub redaction_rejected: u64,
     pub sequence_exhausted: u64,
+    pub exec: u64,
+    pub fork: u64,
+    pub exit: u64,
 }
 
 /// Owns the loaded eBPF object, its tracepoint link, and the `events` ring buffer.
-pub struct ExecEventReader {
+pub struct ProcessEventReader {
     events: RingBuf<MapData>,
     // The loaded object retains the attached tracepoint program and link.
     _ebpf: Ebpf,
 }
 
-impl ExecEventReader {
-    /// Loads the supplied BPF object and attaches its `capture_exec` program.
+impl ProcessEventReader {
+    /// Loads the supplied BPF object and attaches its process lifecycle programs.
     ///
     /// # Errors
     ///
@@ -56,19 +66,25 @@ impl ExecEventReader {
             .map_err(|error| KernelEventError(format!("read BPF object: {error}")))?;
         let mut ebpf = Ebpf::load(&object)
             .map_err(|error| KernelEventError(format!("load BPF object: {error}")))?;
-        let program: &mut TracePoint = ebpf
-            .program_mut("capture_exec")
-            .ok_or_else(|| KernelEventError("capture_exec program not found".to_owned()))?
-            .try_into()
-            .map_err(|error| KernelEventError(format!("open capture_exec program: {error}")))?;
-        program
-            .load()
-            .map_err(|error| KernelEventError(format!("load capture_exec program: {error}")))?;
-        program
-            .attach("sched", "sched_process_exec")
-            .map_err(|error| {
-                KernelEventError(format!("attach capture_exec tracepoint: {error}"))
+        for (program_name, tracepoint_name) in [
+            ("capture_exec", "sched_process_exec"),
+            ("capture_fork", "sched_process_fork"),
+            ("capture_exit", "sched_process_exit"),
+        ] {
+            let program: &mut TracePoint = ebpf
+                .program_mut(program_name)
+                .ok_or_else(|| KernelEventError(format!("{program_name} program not found")))?
+                .try_into()
+                .map_err(|error| {
+                    KernelEventError(format!("open {program_name} program: {error}"))
+                })?;
+            program.load().map_err(|error| {
+                KernelEventError(format!("load {program_name} program: {error}"))
             })?;
+            program.attach("sched", tracepoint_name).map_err(|error| {
+                KernelEventError(format!("attach {program_name} tracepoint: {error}"))
+            })?;
+        }
         let events = RingBuf::try_from(
             ebpf.take_map("events")
                 .ok_or_else(|| KernelEventError("events map not found".to_owned()))?,
@@ -91,9 +107,22 @@ impl ExecEventReader {
                 break;
             };
             result.read = result.read.saturating_add(1);
-            match ingestor.ingest(&event, RedactedTarget::Public(EXEC_TARGET.to_owned())) {
+            let kind = EventHeader::decode(&event).ok().map(|header| header.kind);
+            let target = match kind {
+                Some(EventKind::Exec) => EXEC_TARGET,
+                Some(EventKind::Fork) => FORK_TARGET,
+                Some(EventKind::Exit) => EXIT_TARGET,
+                _ => UNKNOWN_TARGET,
+            };
+            match ingestor.ingest(&event, RedactedTarget::Public(target.to_owned())) {
                 IngestOutcome::Accepted { .. } => {
                     result.accepted = result.accepted.saturating_add(1);
+                    match kind {
+                        Some(EventKind::Exec) => result.exec = result.exec.saturating_add(1),
+                        Some(EventKind::Fork) => result.fork = result.fork.saturating_add(1),
+                        Some(EventKind::Exit) => result.exit = result.exit.saturating_add(1),
+                        _ => {}
+                    }
                 }
                 IngestOutcome::Dropped { .. } => result.dropped = result.dropped.saturating_add(1),
                 IngestOutcome::Malformed { .. } => {
@@ -110,3 +139,6 @@ impl ExecEventReader {
         result
     }
 }
+
+/// Backward-compatible name for callers of the original exec-only reader.
+pub type ExecEventReader = ProcessEventReader;

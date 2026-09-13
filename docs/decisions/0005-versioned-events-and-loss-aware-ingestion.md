@@ -24,9 +24,10 @@ enters the userspace queue.
 
 The ABI layout and malformed-input behavior are unit tested in `sentry-types`.
 The bounded queue, loss accounting, assigned sequence, and redaction behavior
-are unit tested in `sentry-daemon`. On Linux, `sentryd capture-exec <object>
-[duration-ms]` attaches the shared `capture_exec` tracepoint object through Aya
-and drains its `events` ring buffer through that ingestor. Its printed summary
-separates accepted records from dropped, malformed, redaction-rejected, and
-sequence-exhausted results. This is observation plumbing only; it does not
-activate any BPF policy map or enforcement claim.
+are unit tested in `sentry-daemon`. On Linux, `sentryd capture-lifecycle
+<object> [duration-ms]` attaches the shared exec, fork, and exit tracepoints
+through Aya and drains their `events` ring buffer through that ingestor. Its
+printed summary separates each accepted lifecycle kind from dropped,
+malformed, redaction-rejected, and sequence-exhausted results. The older
+`capture-exec` spelling remains an alias. This is observation plumbing only;
+it does not activate any BPF policy map or enforcement claim.

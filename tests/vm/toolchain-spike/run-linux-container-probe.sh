@@ -23,7 +23,9 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
     test -r /sys/kernel/btf/vmlinux && echo "BTF: present"
     test -e /sys/fs/cgroup/cgroup.controllers && echo "cgroup: v2"
     printf "LSMs: "; cat /sys/kernel/security/lsm
-    test -e /sys/kernel/tracing/events/sched/sched_process_exec/id
+    for lifecycle_event in exec fork exit; do
+      test -e "/sys/kernel/tracing/events/sched/sched_process_${lifecycle_event}/id"
+    done
 
     case "$(uname -m)" in
       aarch64|arm64) linux_include=/usr/include/aarch64-linux-gnu ;;
@@ -44,7 +46,7 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
     CARGO_TARGET_DIR=/tmp/sentry-daemon-runtime-target \
       cargo build --locked --quiet -p sentry-daemon
     /tmp/sentry-daemon-runtime-target/debug/sentryd \
-      capture-exec /tmp/tracepoint-ringbuf.bpf.o 1000 \
+      capture-lifecycle /tmp/tracepoint-ringbuf.bpf.o 1000 \
       > /tmp/sentryd-capture.log &
     capture_pid=$!
     sleep 0.2
@@ -52,4 +54,7 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
     wait "$capture_pid"
     cat /tmp/sentryd-capture.log
     grep -Eq "accepted=[1-9][0-9]*" /tmp/sentryd-capture.log
+    grep -Eq "exec=[1-9][0-9]*" /tmp/sentryd-capture.log
+    grep -Eq "fork=[1-9][0-9]*" /tmp/sentryd-capture.log
+    grep -Eq "exit=[1-9][0-9]*" /tmp/sentryd-capture.log
   '

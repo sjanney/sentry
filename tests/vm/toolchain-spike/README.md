@@ -4,13 +4,19 @@
 tracepoint program reserves an event in a ring buffer. `aya-loader` loads that
 object through Aya and attaches it; `libbpf-rs-loader` does the same through
 libbpf-rs. They establish that the target kernel accepts a ring-buffer map and
-tracepoint attachment through each userspace API, trigger a fresh `exec`, and
-consume one fixed-size event. The event is the exact 48-byte
-`sentry_types::EventHeader` ABI v1; both loaders strictly decode it and require
-an `Exec` kind before passing the probe. The probe supplies kernel timestamp
-and process identity only. Daemon-local sequencing, run attribution, and a
-redacted target label remain userspace responsibilities. It does not read
-files, make network connections, or keep links after the container exits.
+exec, fork, and exit tracepoint attachment through each userspace API, trigger
+a fresh child process, and consume all three fixed-size lifecycle events. Each
+event is the exact 48-byte `sentry_types::EventHeader` ABI v1 and both loaders
+strictly decode its kind and identity fields before passing the probe.
+
+Exec and exit records contain the current TGID and TID. The fork tracepoint
+provides the child task ID but not a trustworthy child TGID or start time, so
+fork records set TGID to zero and carry the parent TGID plus child task ID.
+These records are observation evidence only. They are not applied to the
+PID-reuse-safe process tracker until a start-time identity is available. The
+daemon assigns local sequences and redacted event-class labels; run attribution
+also remains userspace work. The probe does not read files, make network
+connections, enforce policy, or keep links after the container exits.
 
 The probe prints both `kernel` and `arch` so each result is attributable to an
 explicit Linux architecture rather than inferred from the calling host.
