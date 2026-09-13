@@ -8,7 +8,7 @@ Status: **not a demo candidate**. This checklist is a release-blocker record.
 | Profile | Deterministic trusted-run profile tests | Passes in library |
 | Generate | CLI review-only candidate from an explicit trusted observation | Partial: not derived from observed kernel events |
 | Dry-run | CLI compiled-policy verdict plus parity tests | Partial: no live kernel-policy map |
-| Enforce | Arm64 Docker BPF LSM/cgroup/seccomp hook probes | Partial: no live policy map/CLI path |
+| Enforce | CLI launch-time seccomp socket denial plus arm64 Docker BPF LSM/cgroup probes | Partial: bounded seccomp path only; no live BPF policy map |
 | Verify | CLI SHA-256 audit verification and Python verifier | Partial: no live kernel event emission |
 
 The host-safe suite, policy fixtures, adversarial corpus, and arm64 Docker hook

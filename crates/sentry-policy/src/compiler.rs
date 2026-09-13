@@ -176,6 +176,8 @@ pub enum ActivationError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FallbackPolicyError {
+    UnsupportedSchema { found: u32 },
+    ZeroPolicyVersion,
     UnsupportedMode,
     NonDenyDefault,
     DomainRulesUnsupported,
@@ -195,6 +197,14 @@ pub enum FallbackPolicyError {
 /// Returns a typed error when the policy requests a mode, destination rule,
 /// or kernel capability outside the fallback subset.
 pub fn validate_seccomp_fallback(policy: &PolicySpec) -> Result<(), FallbackPolicyError> {
+    if policy.schema_version != 1 {
+        return Err(FallbackPolicyError::UnsupportedSchema {
+            found: policy.schema_version,
+        });
+    }
+    if policy.policy_version == 0 {
+        return Err(FallbackPolicyError::ZeroPolicyVersion);
+    }
     if policy.mode != PolicyMode::Enforce {
         return Err(FallbackPolicyError::UnsupportedMode);
     }
@@ -723,6 +733,18 @@ mod tests {
         assert_eq!(
             validate_seccomp_fallback(&spec),
             Err(FallbackPolicyError::UnsupportedMode)
+        );
+        spec.mode = PolicyMode::Enforce;
+        spec.schema_version = 2;
+        assert_eq!(
+            validate_seccomp_fallback(&spec),
+            Err(FallbackPolicyError::UnsupportedSchema { found: 2 })
+        );
+        spec.schema_version = 1;
+        spec.policy_version = 0;
+        assert_eq!(
+            validate_seccomp_fallback(&spec),
+            Err(FallbackPolicyError::ZeroPolicyVersion)
         );
     }
 

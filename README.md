@@ -2,8 +2,9 @@
 
 Sentry is a Linux runtime least-privilege sensor for AI-agent processes. It is
 Apache-2.0 licensed and currently an MVP foundation: the policy, evidence,
-kernel capability probes, and safety contracts are implemented, while live
-CLI-to-kernel enforcement wiring remains a release blocker.
+kernel capability probes, and safety contracts are implemented. A narrow
+launch-time seccomp path is wired into the CLI; full policy enforcement through
+the BPF LSM and cgroup programs remains a release blocker.
 
 ## Three-minute local walkthrough
 
@@ -37,6 +38,11 @@ activate kernel enforcement.
 
 CIDR rules can be evaluated with `sentry dry-run --allow-cidr 198.51.100.0/24
 --ip 198.51.100.7`.
+
+On Linux, `sentry enforce --policy examples/seccomp-socket-deny.json -- COMMAND`
+installs the documented fallback before the command starts. It denies only new
+`socket(2)` calls with `EPERM`; it does not establish general egress,
+filesystem, inherited-descriptor, or attach-mode enforcement.
 
 Run the host-safe verification suite with `bash scripts/verify.sh`. On an
 arm64 Linux Docker host, run
@@ -72,8 +78,9 @@ attribution, or domain proof from TLS SNI/HTTP Host.
 | x86_64 Linux | Not yet run | Not yet run | Unsupported |
 | macOS/Windows | None | None | Unsupported |
 
-The fallback supports only launch-time default-deny egress with no allowed
-network destinations. It cannot attach to a running process.
+The wired fallback supports only launch-time `socket(2)` denial for a
+default-deny policy with no allowed network destinations. It cannot attach to a
+running process and is not equivalent to cgroup network enforcement.
 
 ## Install, uninstall, and recovery
 

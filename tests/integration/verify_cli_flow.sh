@@ -73,6 +73,24 @@ if [[ $(uname -s) == Linux ]]; then
     echo 'attach accepted unexpected arguments' >&2
     exit 1
   fi
+  fallback_output=$(cargo run -q -p sentry-cli -- enforce \
+    --policy examples/seccomp-socket-deny.json -- python3 -c '
+import errno
+import socket
+
+try:
+    socket.socket()
+except PermissionError as error:
+    raise SystemExit(0 if error.errno == errno.EPERM else 2)
+raise SystemExit(3)
+' 2>&1)
+  grep -Fq 'enforcement_path=seccomp_socket_deny scope=socket(2)_only' \
+    <<<"$fallback_output"
+  if cargo run -q -p sentry-cli -- enforce \
+    --policy examples/policy-v0.json -- sh -c 'exit 99'; then
+    echo 'seccomp fallback accepted a policy outside its bounded input schema' >&2
+    exit 1
+  fi
 else
   echo 'skipped Linux-only observe CLI flow'
 fi

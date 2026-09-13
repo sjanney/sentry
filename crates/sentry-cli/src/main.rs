@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 use std::process;
 
-use sentry_cli::{Capability, CliError, CommandOutcome, capabilities, run_command};
+use sentry_cli::{
+    Capability, CliError, CommandOutcome, capabilities, run_command,
+    run_command_with_seccomp_socket_deny,
+};
 use sentry_daemon::audit::{self, AuditEvent, AuditLog};
 use sentry_daemon::capability::KernelPreflight;
 use sentry_daemon::process_snapshot::{SnapshotError, snapshot_process_tree};
@@ -9,12 +12,13 @@ use sentry_policy::{
     Destination, ObservationTrust, RunCompleteness, RunObservation, TaintMask,
     compiler::{
         KernelCapability, KernelPolicyLimits, PolicyMode, PolicySpec, compile_kernel_policy,
+        load_policy_spec_json, validate_seccomp_fallback,
     },
     merge_profile, render_policy_candidate,
 };
 use std::collections::BTreeSet;
 
-const USAGE: &str = "usage: sentry <run|observe> -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run (--allow-domain DOMAIN --domain DOMAIN | --allow-cidr CIDR --ip IP) [--secret] | attach <pid> | capabilities | audit verify <path> [--checkpoint-sequence N --checkpoint-hash HEX]";
+const USAGE: &str = "usage: sentry <run|observe> -- <command> [args...] | enforce --policy PATH -- <command> [args...] | generate --run-id ID --workspace PATH --domain DOMAIN | dry-run (--allow-domain DOMAIN --domain DOMAIN | --allow-cidr CIDR --ip IP) [--secret] | attach <pid> | capabilities | audit verify <path> [--checkpoint-sequence N --checkpoint-hash HEX]";
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -32,6 +36,7 @@ fn main() {
             }
         }
         Some("observe") => observe_command(&arguments[1..]),
+        Some("enforce") => enforce_command(&arguments[1..]),
         Some("attach") => attach_command(&arguments[1..]),
         Some("capabilities") => capabilities(std::env::consts::OS)
             .map(|capabilities| {
@@ -95,6 +100,22 @@ fn main() {
             process::exit(2);
         }
     }
+}
+
+fn enforce_command(arguments: &[String]) -> Result<CommandOutcome, String> {
+    if std::env::consts::OS != "linux" {
+        return Err(render_error(&CliError::UnsupportedHost));
+    }
+    if arguments.len() < 4 || arguments[0] != "--policy" || arguments[2] != "--" {
+        return Err("enforce requires --policy PATH -- COMMAND".to_owned());
+    }
+    let input = std::fs::read_to_string(&arguments[1])
+        .map_err(|error| format!("could not read fallback policy: {error}"))?;
+    let policy = load_policy_spec_json(&input)
+        .map_err(|error| format!("fallback policy is not valid JSON: {error}"))?;
+    validate_seccomp_fallback(&policy)
+        .map_err(|error| format!("fallback policy rejected: {error:?}"))?;
+    run_command_with_seccomp_socket_deny(&arguments[3..]).map_err(|error| render_error(&error))
 }
 
 fn verify_audit(arguments: &[String]) -> Result<CommandOutcome, String> {
@@ -382,5 +403,6 @@ fn render_error(error: &CliError) -> String {
         CliError::InvalidPid => "attach requires a non-zero numeric PID".to_owned(),
         CliError::UnsupportedHost => "this MVP supports Linux hosts only".to_owned(),
         CliError::Spawn(kind) => format!("could not start command: {kind}"),
+        CliError::SeccompSetup(detail) => format!("could not install seccomp fallback: {detail}"),
     }
 }

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "policy_version": 1,
+  "mode": "enforce",
+  "default_deny": true,
+  "deny_untrusted_egress": true,
+  "allowed_domains": [],
+  "allowed_cidrs": [],
+  "required_capabilities": []
+}
