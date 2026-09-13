@@ -5,6 +5,9 @@ pub mod capability;
 pub mod lifecycle;
 pub mod process_snapshot;
 
+#[cfg(target_os = "linux")]
+pub mod kernel_events;
+
 use std::{
     collections::{HashMap, VecDeque},
     fs,

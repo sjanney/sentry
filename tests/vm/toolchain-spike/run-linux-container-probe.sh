@@ -40,4 +40,16 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
     CARGO_TARGET_DIR=/tmp/sentry-libbpf-rs-probe-target \
       cargo run --locked --quiet --manifest-path tests/vm/toolchain-spike/libbpf-rs-loader/Cargo.toml \
       -- /tmp/tracepoint-ringbuf.bpf.o
+
+    CARGO_TARGET_DIR=/tmp/sentry-daemon-runtime-target \
+      cargo build --locked --quiet -p sentry-daemon
+    /tmp/sentry-daemon-runtime-target/debug/sentryd \
+      capture-exec /tmp/tracepoint-ringbuf.bpf.o 1000 \
+      > /tmp/sentryd-capture.log &
+    capture_pid=$!
+    sleep 0.2
+    /bin/true
+    wait "$capture_pid"
+    cat /tmp/sentryd-capture.log
+    grep -Eq "accepted=[1-9][0-9]*" /tmp/sentryd-capture.log
   '
