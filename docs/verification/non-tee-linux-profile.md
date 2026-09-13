@@ -54,3 +54,7 @@ falls outside the declared kernel and architecture. Until the TRACE governance
 and deployment-profile questions are resolved, Sentry ships this as a
 documented evidence profile that references TRACE rather than claiming a
 standard conformance mark.
+
+The [TRACE governance conclusion](trace-governance-conclusion.md) records the
+sources, terminology boundary, and conditions required before that position can
+change.
