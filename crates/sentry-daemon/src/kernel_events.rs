@@ -198,12 +198,12 @@ impl FilesystemEventReader {
                 device: metadata.dev(),
                 inode: metadata.ino(),
             };
-            if let Some(existing) = resolved.insert(identity, rule.class) {
-                if existing != rule.class {
-                    return Err(KernelEventError(
-                        "one file identity cannot have multiple credential classes".to_owned(),
-                    ));
-                }
+            if let Some(existing) = resolved.insert(identity, rule.class)
+                && existing != rule.class
+            {
+                return Err(KernelEventError(
+                    "one file identity cannot have multiple credential classes".to_owned(),
+                ));
             }
         }
 
