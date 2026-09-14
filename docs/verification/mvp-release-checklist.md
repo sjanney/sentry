@@ -4,12 +4,12 @@ Status: **not a demo candidate**. This checklist is a release-blocker record.
 
 | Required outcome | Evidence | Status |
 | --- | --- | --- |
-| Observe | CLI command audit records, event and filesystem models, adversarial corpus | Partial: no kernel observation wiring |
+| Observe | CLI audit records plus live process-lifecycle and credential-inode events | Partial: no DNS/network wiring; pre-`file_open` denials are invisible |
 | Profile | Deterministic trusted-run profile tests | Passes in library |
 | Generate | CLI review-only candidate from an explicit trusted observation | Partial: not derived from observed kernel events |
 | Dry-run | CLI compiled-policy verdict plus parity tests | Partial: no live kernel-policy map |
 | Enforce | CLI launch-time seccomp socket denial plus arm64 Docker BPF LSM/cgroup probes | Partial: bounded seccomp path only; no live BPF policy map |
-| Verify | CLI SHA-256 audit verification and Python verifier | Partial: no live kernel event emission |
+| Verify | CLI SHA-256 audit verification, Python verifier, and strict live kernel-event decoding | Partial: live events are not yet incorporated into a complete run attestation |
 
 The host-safe suite, policy fixtures, adversarial corpus, and arm64 Docker hook
 probe pass. The x86_64 probe is implemented but has not yet produced

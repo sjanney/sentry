@@ -4,6 +4,8 @@
 pub const EVENT_ABI_VERSION: u16 = 1;
 pub const EVENT_HEADER_SIZE: usize = 48;
 pub const EVENT_HEADER_SIZE_U32: u32 = 48;
+pub const FILE_OPEN_EVENT_SIZE: usize = 72;
+pub const FILE_OPEN_EVENT_SIZE_U32: u32 = 72;
 pub const MAX_EVENT_BYTES: u32 = 4096;
 pub const KERNEL_RING_BUFFER_BYTES: u32 = 1 << 20;
 
@@ -46,6 +48,129 @@ pub enum HeaderDecodeError {
     InvalidLength,
     InvalidFlags,
     NonzeroReserved,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum CredentialClass {
+    SshKey = 1,
+    CloudCredential = 2,
+    DotEnv = 3,
+    Keyring = 4,
+    TokenCache = 5,
+}
+
+impl TryFrom<u8> for CredentialClass {
+    type Error = FileOpenDecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::SshKey),
+            2 => Ok(Self::CloudCredential),
+            3 => Ok(Self::DotEnv),
+            4 => Ok(Self::Keyring),
+            5 => Ok(Self::TokenCache),
+            _ => Err(FileOpenDecodeError::UnknownCredentialClass),
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileAccessStatus {
+    Attempted = 1,
+    Succeeded = 2,
+    Denied = 3,
+}
+
+impl TryFrom<u8> for FileAccessStatus {
+    type Error = FileOpenDecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Attempted),
+            2 => Ok(Self::Succeeded),
+            3 => Ok(Self::Denied),
+            _ => Err(FileOpenDecodeError::UnknownStatus),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileOpenDecodeError {
+    Header(HeaderDecodeError),
+    WrongKind,
+    InvalidLength,
+    UnknownCredentialClass,
+    UnknownStatus,
+    NonzeroReserved,
+    InvalidErrno,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileOpenEvent {
+    pub header: EventHeader,
+    pub credential_class: CredentialClass,
+    pub status: FileAccessStatus,
+    pub errno: i32,
+    pub device: u64,
+    pub inode: u64,
+}
+
+impl FileOpenEvent {
+    #[must_use]
+    pub fn encode(self) -> [u8; FILE_OPEN_EVENT_SIZE] {
+        let mut bytes = [0; FILE_OPEN_EVENT_SIZE];
+        bytes[..EVENT_HEADER_SIZE].copy_from_slice(&self.header.encode());
+        bytes[48] = self.credential_class as u8;
+        bytes[49] = self.status as u8;
+        bytes[52..56].copy_from_slice(&self.errno.to_le_bytes());
+        bytes[56..64].copy_from_slice(&self.device.to_le_bytes());
+        bytes[64..72].copy_from_slice(&self.inode.to_le_bytes());
+        bytes
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error when the record is not an exact, canonical file-open
+    /// event. Successful and attempted records require errno zero; denied
+    /// records require a positive errno.
+    pub fn decode(bytes: &[u8]) -> Result<Self, FileOpenDecodeError> {
+        let header = EventHeader::decode(bytes).map_err(FileOpenDecodeError::Header)?;
+        if header.kind != EventKind::FileOpen {
+            return Err(FileOpenDecodeError::WrongKind);
+        }
+        if bytes.len() != FILE_OPEN_EVENT_SIZE || header.event_size != FILE_OPEN_EVENT_SIZE_U32 {
+            return Err(FileOpenDecodeError::InvalidLength);
+        }
+        if bytes[50] != 0 || bytes[51] != 0 {
+            return Err(FileOpenDecodeError::NonzeroReserved);
+        }
+        let credential_class = CredentialClass::try_from(bytes[48])?;
+        let status = FileAccessStatus::try_from(bytes[49])?;
+        let errno = i32::from_le_bytes(
+            bytes[52..56]
+                .try_into()
+                .map_err(|_| FileOpenDecodeError::InvalidLength)?,
+        );
+        match status {
+            FileAccessStatus::Denied if errno <= 0 => {
+                return Err(FileOpenDecodeError::InvalidErrno);
+            }
+            FileAccessStatus::Attempted | FileAccessStatus::Succeeded if errno != 0 => {
+                return Err(FileOpenDecodeError::InvalidErrno);
+            }
+            _ => {}
+        }
+        Ok(Self {
+            header,
+            credential_class,
+            status,
+            errno,
+            device: read_u64(bytes, 56).map_err(FileOpenDecodeError::Header)?,
+            inode: read_u64(bytes, 64).map_err(FileOpenDecodeError::Header)?,
+        })
+    }
 }
 
 #[repr(C)]
@@ -240,6 +365,57 @@ mod tests {
         assert_eq!(
             EventHeader::decode(&bytes),
             Err(HeaderDecodeError::InvalidLength)
+        );
+    }
+
+    fn file_open(status: FileAccessStatus, errno: i32) -> FileOpenEvent {
+        FileOpenEvent {
+            header: EventHeader::new(
+                EventKind::FileOpen,
+                FILE_OPEN_EVENT_SIZE_U32,
+                0,
+                99,
+                ProcessIdentity {
+                    run_id: 0,
+                    tgid: 10,
+                    tid: 11,
+                    parent_tgid: 0,
+                },
+            ),
+            credential_class: CredentialClass::SshKey,
+            status,
+            errno,
+            device: 12,
+            inode: 13,
+        }
+    }
+
+    #[test]
+    fn file_open_event_round_trips_without_a_path_or_content_field() {
+        let event = file_open(FileAccessStatus::Denied, 13);
+        assert_eq!(FileOpenEvent::decode(&event.encode()), Ok(event));
+        assert_eq!(size_of::<FileOpenEvent>(), FILE_OPEN_EVENT_SIZE);
+        assert_eq!(FILE_OPEN_EVENT_SIZE, 72);
+    }
+
+    #[test]
+    fn file_open_event_rejects_noncanonical_outcomes() {
+        let mut bytes = file_open(FileAccessStatus::Succeeded, 0).encode();
+        bytes[50] = 1;
+        assert_eq!(
+            FileOpenEvent::decode(&bytes),
+            Err(FileOpenDecodeError::NonzeroReserved)
+        );
+
+        let bytes = file_open(FileAccessStatus::Succeeded, 13).encode();
+        assert_eq!(
+            FileOpenEvent::decode(&bytes),
+            Err(FileOpenDecodeError::InvalidErrno)
+        );
+        let bytes = file_open(FileAccessStatus::Denied, 0).encode();
+        assert_eq!(
+            FileOpenEvent::decode(&bytes),
+            Err(FileOpenDecodeError::InvalidErrno)
         );
     }
 }

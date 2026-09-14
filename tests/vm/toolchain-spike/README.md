@@ -21,6 +21,15 @@ connections, enforce policy, or keep links after the container exits.
 The probe prints both `kernel` and `arch` so each result is attributable to an
 explicit Linux architecture rather than inferred from the calling host.
 
+`filesystem-observe.bpf.c` is a separate observation-only BPF LSM probe. The
+daemon resolves configured credential fixtures to device/inode identities,
+loads only those identities and class numbers into the kernel, and emits a
+path-free attempted/final-result record for matching `open`, `openat`, and
+`openat2` calls. The native runner checks the five MVP credential classes,
+hardlink, symlink, rename, and bind-mount namespace aliases. The filesystem
+decision record documents denials and other access paths that the hook cannot
+see.
+
 Run the native Linux architecture check from the repository root:
 
 ```sh

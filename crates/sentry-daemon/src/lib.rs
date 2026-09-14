@@ -17,6 +17,7 @@ use std::{
 };
 
 use sentry_policy::TaintMask;
+pub use sentry_types::CredentialClass;
 use sentry_types::EventHeader;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -317,15 +318,6 @@ impl ProcessTracker {
         self.processes.insert(key, record);
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum CredentialClass {
-    SshKey,
-    CloudCredential,
-    DotEnv,
-    Keyring,
-    TokenCache,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
