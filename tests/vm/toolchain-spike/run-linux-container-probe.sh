@@ -9,7 +9,7 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
   rust:1.92-bookworm -ceu '
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-      bpftool ca-certificates clang libbpf-dev linux-libc-dev llvm
+      bpftool ca-certificates clang gcc libbpf-dev linux-libc-dev llvm
 
     mkdir -p /sys/kernel/security /sys/kernel/tracing
     mount -t securityfs securityfs /sys/kernel/security 2>/dev/null || true
@@ -36,6 +36,11 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
     clang -target bpf -O2 -g -I"$linux_include" -c \
       tests/vm/toolchain-spike/tracepoint-ringbuf.bpf.c \
       -o /tmp/tracepoint-ringbuf.bpf.o
+    clang -target bpf -O2 -g -I"$linux_include" -c \
+      tests/vm/toolchain-spike/connection-observe.bpf.c \
+      -o /tmp/connection-observe.bpf.o
+    gcc -Wall -Wextra -Werror tests/vm/toolchain-spike/connection-client.c \
+      -o /tmp/connection-client
     bpftool btf dump file /sys/kernel/btf/vmlinux format c > /tmp/vmlinux.h
     case "$(uname -m)" in
       aarch64|arm64) target_arch=arm64 ;;
@@ -58,7 +63,11 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
       capture-lifecycle /tmp/tracepoint-ringbuf.bpf.o 1000 \
       > /tmp/sentryd-capture.log &
     capture_pid=$!
-    sleep 0.2
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+      grep -q "capture-lifecycle: ready" /tmp/sentryd-capture.log && break
+      sleep 0.1
+    done
+    grep -q "capture-lifecycle: ready" /tmp/sentryd-capture.log
     /bin/true
     wait "$capture_pid"
     cat /tmp/sentryd-capture.log
@@ -115,4 +124,21 @@ docker run --rm --privileged -e SENTRY_EXPECT_ARCH \
       echo "filesystem observation leaked a fixture path or content" >&2
       exit 1
     fi
+
+    /tmp/sentry-daemon-runtime-target/debug/sentryd capture-connections \
+      /tmp/connection-observe.bpf.o /sys/fs/cgroup 1500 \
+      > /tmp/sentryd-connections.log &
+    connection_pid=$!
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+      grep -q "capture-connections: ready" /tmp/sentryd-connections.log && break
+      sleep 0.1
+    done
+    grep -q "capture-connections: ready" /tmp/sentryd-connections.log
+    /tmp/connection-client
+    wait "$connection_pid"
+    cat /tmp/sentryd-connections.log
+    grep -Eq "tcp=[1-9][0-9]* udp=[1-9][0-9]*" /tmp/sentryd-connections.log
+    grep -Eq "ipv4=[1-9][0-9]* ipv6=[1-9][0-9]*" /tmp/sentryd-connections.log
+    grep -Eq "unknown=[1-9][0-9]* correlated=0" /tmp/sentryd-connections.log
+    grep -Eq "dropped=0 malformed=0" /tmp/sentryd-connections.log
   '

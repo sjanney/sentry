@@ -18,6 +18,11 @@ docker run --rm \
     clang -target bpf -O2 -g -I"$arch_include" -c \
       tests/vm/toolchain-spike/tracepoint-ringbuf.bpf.c \
       -o /tmp/tracepoint-ringbuf.bpf.o
+    clang -target bpf -O2 -g -I"$arch_include" -c \
+      tests/vm/toolchain-spike/connection-observe.bpf.c \
+      -o /tmp/connection-observe.bpf.o
+    gcc -Wall -Wextra -Werror tests/vm/toolchain-spike/connection-client.c \
+      -o /tmp/connection-client
     bpftool btf dump file /sys/kernel/btf/vmlinux format c > /tmp/vmlinux.h
     case "$(uname -m)" in
       aarch64|arm64) target_arch=arm64 ;;

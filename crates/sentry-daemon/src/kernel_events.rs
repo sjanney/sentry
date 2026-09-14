@@ -11,6 +11,8 @@ use std::{
     collections::HashMap as StdHashMap,
     error::Error,
     fmt, fs,
+    fs::File,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
@@ -18,19 +20,24 @@ use std::{
 use aya::{
     Btf, Ebpf,
     maps::{HashMap, MapData, RingBuf},
-    programs::{Lsm, RawTracePoint, TracePoint},
+    programs::{CgroupAttachMode, CgroupSockAddr, Lsm, RawTracePoint, TracePoint},
 };
-use sentry_types::{CredentialClass, EventHeader, EventKind, FileAccessStatus, FileOpenEvent};
+use sentry_types::{
+    AddressFamily, ConnectEvent, CredentialClass, EventHeader, EventKind, FileAccessStatus,
+    FileOpenEvent, NetworkProtocol,
+};
 
 use crate::{
-    EventIngestor, FileAccessObservation, FileAccessOutcome, FileIdentity, IngestOutcome,
-    ObservedTarget, RedactedTarget,
+    ConnectionObservation, DnsEvidenceCache, EventIngestor, FileAccessObservation,
+    FileAccessOutcome, FileIdentity, IngestOutcome, ObservedTarget, RedactedTarget,
+    TransportProtocol,
 };
 
 const EXEC_TARGET: &str = "process_exec";
 const FORK_TARGET: &str = "process_fork";
 const EXIT_TARGET: &str = "process_exit";
 const UNKNOWN_TARGET: &str = "process_event";
+const CONNECTION_TARGET: &str = "network_destination";
 
 #[derive(Debug)]
 pub struct KernelEventError(String);
@@ -350,5 +357,144 @@ const fn credential_class_name(class: CredentialClass) -> &'static str {
         CredentialClass::DotEnv => "dotenv",
         CredentialClass::Keyring => "keyring",
         CredentialClass::TokenCache => "token_cache",
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ConnectionDrain {
+    pub read: u64,
+    pub accepted: u64,
+    pub tcp: u64,
+    pub udp: u64,
+    pub ipv4: u64,
+    pub ipv6: u64,
+    pub unknown: u64,
+    pub correlated: u64,
+    pub dropped: u64,
+    pub malformed: u64,
+    pub sequence_exhausted: u64,
+}
+
+/// Owns observation-only cgroup connect hooks and their ring buffer.
+pub struct ConnectionEventReader {
+    events: RingBuf<MapData>,
+    _cgroup: File,
+    _ebpf: Ebpf,
+}
+
+impl ConnectionEventReader {
+    /// Loads and attaches IPv4 and IPv6 connect observers to `cgroup_path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the object, cgroup, programs, or ring buffer
+    /// cannot be opened, loaded, or attached.
+    pub fn load(object_path: &Path, cgroup_path: &Path) -> Result<Self, KernelEventError> {
+        let object = fs::read(object_path)
+            .map_err(|error| KernelEventError(format!("read BPF object: {error}")))?;
+        let mut ebpf = Ebpf::load(&object)
+            .map_err(|error| KernelEventError(format!("load BPF object: {error}")))?;
+        let cgroup = File::open(cgroup_path)
+            .map_err(|error| KernelEventError(format!("open cgroup: {error}")))?;
+        for program_name in ["observe_connect4", "observe_connect6"] {
+            let program: &mut CgroupSockAddr = ebpf
+                .program_mut(program_name)
+                .ok_or_else(|| KernelEventError(format!("{program_name} program not found")))?
+                .try_into()
+                .map_err(|error| KernelEventError(format!("open {program_name}: {error}")))?;
+            program
+                .load()
+                .map_err(|error| KernelEventError(format!("load {program_name}: {error}")))?;
+            program
+                .attach(&cgroup, CgroupAttachMode::Single)
+                .map_err(|error| KernelEventError(format!("attach {program_name}: {error}")))?;
+        }
+        let events = RingBuf::try_from(
+            ebpf.take_map("events")
+                .ok_or_else(|| KernelEventError("events map not found".to_owned()))?,
+        )
+        .map_err(|error| KernelEventError(format!("open events ring buffer: {error}")))?;
+        Ok(Self {
+            events,
+            _cgroup: cgroup,
+            _ebpf: ebpf,
+        })
+    }
+
+    /// Drains connect attempts and performs run-scoped DNS correlation using
+    /// the kernel monotonic timestamp carried by each record.
+    pub fn drain(
+        &mut self,
+        ingestor: &mut EventIngestor,
+        dns: &mut DnsEvidenceCache,
+        run_id: u64,
+        maximum: usize,
+    ) -> (ConnectionDrain, Vec<ConnectionObservation>) {
+        let mut drain = ConnectionDrain::default();
+        let mut observations = Vec::new();
+        for _ in 0..maximum {
+            let Some(bytes) = self.events.next() else {
+                break;
+            };
+            drain.read = drain.read.saturating_add(1);
+            let Ok(event) = ConnectEvent::decode(&bytes) else {
+                drain.malformed = drain.malformed.saturating_add(1);
+                continue;
+            };
+            let destination = match event.family {
+                AddressFamily::Ipv4 => {
+                    drain.ipv4 = drain.ipv4.saturating_add(1);
+                    IpAddr::V4(Ipv4Addr::new(
+                        event.address[0],
+                        event.address[1],
+                        event.address[2],
+                        event.address[3],
+                    ))
+                }
+                AddressFamily::Ipv6 => {
+                    drain.ipv6 = drain.ipv6.saturating_add(1);
+                    IpAddr::V6(Ipv6Addr::from(event.address))
+                }
+            };
+            let protocol = match event.protocol {
+                NetworkProtocol::Tcp => {
+                    drain.tcp = drain.tcp.saturating_add(1);
+                    TransportProtocol::Tcp
+                }
+                NetworkProtocol::Udp => {
+                    drain.udp = drain.udp.saturating_add(1);
+                    TransportProtocol::Udp
+                }
+            };
+            match ingestor.ingest(&bytes, RedactedTarget::Public(CONNECTION_TARGET.to_owned())) {
+                IngestOutcome::Accepted { .. } => {
+                    drain.accepted = drain.accepted.saturating_add(1);
+                    let observation = dns.observe_connect(
+                        run_id,
+                        destination,
+                        event.port,
+                        protocol,
+                        event.header.timestamp_ns,
+                    );
+                    if matches!(
+                        observation.target,
+                        crate::ConnectionTarget::UnknownDestination
+                    ) {
+                        drain.unknown = drain.unknown.saturating_add(1);
+                    } else {
+                        drain.correlated = drain.correlated.saturating_add(1);
+                    }
+                    observations.push(observation);
+                }
+                IngestOutcome::Dropped { .. } => drain.dropped = drain.dropped.saturating_add(1),
+                IngestOutcome::Malformed { .. } | IngestOutcome::RedactionRejected { .. } => {
+                    drain.malformed = drain.malformed.saturating_add(1);
+                }
+                IngestOutcome::SequenceExhausted => {
+                    drain.sequence_exhausted = drain.sequence_exhausted.saturating_add(1);
+                }
+            }
+        }
+        (drain, observations)
     }
 }

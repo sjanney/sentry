@@ -6,6 +6,8 @@ pub const EVENT_HEADER_SIZE: usize = 48;
 pub const EVENT_HEADER_SIZE_U32: u32 = 48;
 pub const FILE_OPEN_EVENT_SIZE: usize = 72;
 pub const FILE_OPEN_EVENT_SIZE_U32: u32 = 72;
+pub const CONNECT_EVENT_SIZE: usize = 72;
+pub const CONNECT_EVENT_SIZE_U32: u32 = 72;
 pub const MAX_EVENT_BYTES: u32 = 4096;
 pub const KERNEL_RING_BUFFER_BYTES: u32 = 1 << 20;
 
@@ -105,6 +107,91 @@ pub enum FileOpenDecodeError {
     UnknownStatus,
     NonzeroReserved,
     InvalidErrno,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AddressFamily {
+    Ipv4 = 4,
+    Ipv6 = 6,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NetworkProtocol {
+    Tcp = 6,
+    Udp = 17,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectDecodeError {
+    Header(HeaderDecodeError),
+    WrongKind,
+    InvalidLength,
+    UnknownFamily,
+    UnknownProtocol,
+    NonzeroReserved,
+    NoncanonicalIpv4,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ConnectEvent {
+    pub header: EventHeader,
+    pub family: AddressFamily,
+    pub protocol: NetworkProtocol,
+    pub port: u16,
+    pub address: [u8; 16],
+}
+
+impl ConnectEvent {
+    #[must_use]
+    pub fn encode(self) -> [u8; CONNECT_EVENT_SIZE] {
+        let mut bytes = [0; CONNECT_EVENT_SIZE];
+        bytes[..EVENT_HEADER_SIZE].copy_from_slice(&self.header.encode());
+        bytes[48] = self.family as u8;
+        bytes[49] = self.protocol as u8;
+        bytes[52..54].copy_from_slice(&self.port.to_le_bytes());
+        bytes[56..72].copy_from_slice(&self.address);
+        bytes
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error unless the input is the exact canonical connect record.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ConnectDecodeError> {
+        let header = EventHeader::decode(bytes).map_err(ConnectDecodeError::Header)?;
+        if header.kind != EventKind::Connect {
+            return Err(ConnectDecodeError::WrongKind);
+        }
+        if bytes.len() != CONNECT_EVENT_SIZE || header.event_size != CONNECT_EVENT_SIZE_U32 {
+            return Err(ConnectDecodeError::InvalidLength);
+        }
+        if bytes[50] != 0 || bytes[51] != 0 || bytes[54] != 0 || bytes[55] != 0 {
+            return Err(ConnectDecodeError::NonzeroReserved);
+        }
+        let family = match bytes[48] {
+            4 => AddressFamily::Ipv4,
+            6 => AddressFamily::Ipv6,
+            _ => return Err(ConnectDecodeError::UnknownFamily),
+        };
+        let protocol = match bytes[49] {
+            6 => NetworkProtocol::Tcp,
+            17 => NetworkProtocol::Udp,
+            _ => return Err(ConnectDecodeError::UnknownProtocol),
+        };
+        let mut address = [0; 16];
+        address.copy_from_slice(&bytes[56..72]);
+        if family == AddressFamily::Ipv4 && address[4..].iter().any(|byte| *byte != 0) {
+            return Err(ConnectDecodeError::NoncanonicalIpv4);
+        }
+        Ok(Self {
+            header,
+            family,
+            protocol,
+            port: u16::from_le_bytes([bytes[52], bytes[53]]),
+            address,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -416,6 +503,62 @@ mod tests {
         assert_eq!(
             FileOpenEvent::decode(&bytes),
             Err(FileOpenDecodeError::InvalidErrno)
+        );
+    }
+
+    fn connect(family: AddressFamily, protocol: NetworkProtocol) -> ConnectEvent {
+        let mut address = [0; 16];
+        match family {
+            AddressFamily::Ipv4 => address[..4].copy_from_slice(&[127, 0, 0, 1]),
+            AddressFamily::Ipv6 => {
+                address.copy_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+            }
+        }
+        ConnectEvent {
+            header: EventHeader::new(
+                EventKind::Connect,
+                CONNECT_EVENT_SIZE_U32,
+                0,
+                101,
+                ProcessIdentity {
+                    run_id: 0,
+                    tgid: 20,
+                    tid: 21,
+                    parent_tgid: 0,
+                },
+            ),
+            family,
+            protocol,
+            port: 443,
+            address,
+        }
+    }
+
+    #[test]
+    fn connect_events_cover_both_families_and_protocols() {
+        for event in [
+            connect(AddressFamily::Ipv4, NetworkProtocol::Tcp),
+            connect(AddressFamily::Ipv4, NetworkProtocol::Udp),
+            connect(AddressFamily::Ipv6, NetworkProtocol::Tcp),
+            connect(AddressFamily::Ipv6, NetworkProtocol::Udp),
+        ] {
+            assert_eq!(ConnectEvent::decode(&event.encode()), Ok(event));
+        }
+    }
+
+    #[test]
+    fn connect_events_reject_reserved_and_noncanonical_address_bytes() {
+        let mut bytes = connect(AddressFamily::Ipv4, NetworkProtocol::Tcp).encode();
+        bytes[54] = 1;
+        assert_eq!(
+            ConnectEvent::decode(&bytes),
+            Err(ConnectDecodeError::NonzeroReserved)
+        );
+        let mut bytes = connect(AddressFamily::Ipv4, NetworkProtocol::Tcp).encode();
+        bytes[71] = 1;
+        assert_eq!(
+            ConnectEvent::decode(&bytes),
+            Err(ConnectDecodeError::NoncanonicalIpv4)
         );
     }
 }

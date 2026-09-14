@@ -17,6 +17,10 @@ fn capture_lifecycle(object_path: &Path, duration: Duration) -> Result<(), Strin
         let mut reader =
             ProcessEventReader::load(object_path).map_err(|error| error.to_string())?;
         let mut ingestor = EventIngestor::new(16_384);
+        println!("capture-lifecycle: ready");
+        std::io::stdout()
+            .flush()
+            .map_err(|error| error.to_string())?;
         let deadline = Instant::now() + duration;
         let mut total = sentry_daemon::kernel_events::KernelDrain::default();
         while Instant::now() < deadline {
@@ -171,8 +175,108 @@ fn capture_filesystem(
     }
 }
 
+fn capture_connections(
+    object_path: &Path,
+    cgroup_path: &Path,
+    duration: Duration,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use sentry_daemon::{
+            ConnectionTarget, DnsEvidenceCache, EventIngestor,
+            kernel_events::{ConnectionDrain, ConnectionEventReader},
+        };
+
+        let mut reader = ConnectionEventReader::load(object_path, cgroup_path)
+            .map_err(|error| error.to_string())?;
+        let mut ingestor = EventIngestor::new(16_384);
+        let mut dns = DnsEvidenceCache::new(1_024);
+        println!("capture-connections: ready");
+        std::io::stdout()
+            .flush()
+            .map_err(|error| error.to_string())?;
+        let deadline = Instant::now() + duration;
+        let mut total = ConnectionDrain::default();
+        while Instant::now() < deadline {
+            let (drain, observations) = reader.drain(&mut ingestor, &mut dns, 1, 1_024);
+            total.read = total.read.saturating_add(drain.read);
+            total.accepted = total.accepted.saturating_add(drain.accepted);
+            total.tcp = total.tcp.saturating_add(drain.tcp);
+            total.udp = total.udp.saturating_add(drain.udp);
+            total.ipv4 = total.ipv4.saturating_add(drain.ipv4);
+            total.ipv6 = total.ipv6.saturating_add(drain.ipv6);
+            total.unknown = total.unknown.saturating_add(drain.unknown);
+            total.correlated = total.correlated.saturating_add(drain.correlated);
+            total.dropped = total.dropped.saturating_add(drain.dropped);
+            total.malformed = total.malformed.saturating_add(drain.malformed);
+            total.sequence_exhausted = total
+                .sequence_exhausted
+                .saturating_add(drain.sequence_exhausted);
+            for observation in observations {
+                let target = match observation.target {
+                    ConnectionTarget::UnknownDestination => "unknown",
+                    ConnectionTarget::DnsCorrelated { .. } => "dns_correlated",
+                };
+                println!(
+                    "connection-event: protocol={:?} destination={} port={} target={target}",
+                    observation.protocol, observation.destination, observation.port
+                );
+            }
+            if drain.read == 0 {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        println!(
+            "capture-connections: read={} accepted={} tcp={} udp={} ipv4={} ipv6={} unknown={} correlated={} dropped={} malformed={} sequence-exhausted={}",
+            total.read,
+            total.accepted,
+            total.tcp,
+            total.udp,
+            total.ipv4,
+            total.ipv6,
+            total.unknown,
+            total.correlated,
+            total.dropped,
+            total.malformed,
+            total.sequence_exhausted,
+        );
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (object_path, cgroup_path, duration);
+        Err("capture-connections requires Linux".to_owned())
+    }
+}
+
 fn main() {
     let arguments: Vec<String> = std::env::args().collect();
+    if arguments
+        .get(1)
+        .is_some_and(|argument| argument == "capture-connections")
+    {
+        let (Some(object), Some(cgroup), Some(duration)) =
+            (arguments.get(2), arguments.get(3), arguments.get(4))
+        else {
+            eprintln!(
+                "usage: sentryd capture-connections <BPF-object> <cgroup-path> <duration-ms>"
+            );
+            std::process::exit(2);
+        };
+        let duration_ms = duration.parse::<u64>().unwrap_or_else(|_| {
+            eprintln!("duration-ms must be an unsigned integer");
+            std::process::exit(2);
+        });
+        if let Err(error) = capture_connections(
+            Path::new(object),
+            Path::new(cgroup),
+            Duration::from_millis(duration_ms),
+        ) {
+            eprintln!("capture-connections failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if arguments
         .get(1)
         .is_some_and(|argument| argument == "capture-filesystem")

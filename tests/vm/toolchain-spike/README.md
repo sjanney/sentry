@@ -30,6 +30,13 @@ hardlink, symlink, rename, and bind-mount namespace aliases. The filesystem
 decision record documents denials and other access paths that the hook cannot
 see.
 
+`connection-observe.bpf.c` attaches observation-only cgroup connect4/connect6
+programs. Its fixed record contains the destination address and port plus
+TCP/UDP and IPv4/IPv6 identity. The daemon feeds each record through the
+run-scoped DNS cache. The native fixture leaves that cache empty and requires
+all four protocol/family combinations to remain `UnknownDestination`; this is
+connection evidence, not DNS-observation evidence.
+
 Run the native Linux architecture check from the repository root:
 
 ```sh

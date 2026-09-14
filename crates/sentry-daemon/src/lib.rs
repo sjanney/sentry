@@ -450,6 +450,7 @@ pub enum ConnectionTarget {
 pub struct ConnectionObservation {
     pub run_id: u64,
     pub destination: IpAddr,
+    pub port: u16,
     pub protocol: TransportProtocol,
     pub target: ConnectionTarget,
 }
@@ -498,6 +499,7 @@ impl DnsEvidenceCache {
         &mut self,
         run_id: u64,
         destination: IpAddr,
+        port: u16,
         protocol: TransportProtocol,
         now_ns: u64,
     ) -> ConnectionObservation {
@@ -513,6 +515,7 @@ impl DnsEvidenceCache {
         ConnectionObservation {
             run_id,
             destination,
+            port,
             protocol,
             target,
         }
@@ -837,10 +840,12 @@ mod tests {
             .record(5, ipv6, dns_evidence("dns.example", "2001:db8::53", 10), 1)
             .unwrap();
 
-        let tcp = cache.observe_connect(5, ipv4, TransportProtocol::Tcp, 2);
-        let udp = cache.observe_connect(5, ipv6, TransportProtocol::Udp, 2);
+        let tcp = cache.observe_connect(5, ipv4, 443, TransportProtocol::Tcp, 2);
+        let udp = cache.observe_connect(5, ipv6, 53, TransportProtocol::Udp, 2);
         assert_eq!(tcp.protocol, TransportProtocol::Tcp);
         assert_eq!(udp.protocol, TransportProtocol::Udp);
+        assert_eq!(tcp.port, 443);
+        assert_eq!(udp.port, 53);
         assert!(matches!(
             tcp.target,
             ConnectionTarget::DnsCorrelated { ref domain, .. } if domain == "api.example"
@@ -874,13 +879,13 @@ mod tests {
         );
         assert_eq!(
             cache
-                .observe_connect(2, destination, TransportProtocol::Tcp, 2)
+                .observe_connect(2, destination, 443, TransportProtocol::Tcp, 2)
                 .target,
             ConnectionTarget::UnknownDestination
         );
         assert_eq!(
             cache
-                .observe_connect(1, destination, TransportProtocol::Tcp, 5)
+                .observe_connect(1, destination, 443, TransportProtocol::Tcp, 5)
                 .target,
             ConnectionTarget::UnknownDestination
         );

@@ -4,7 +4,7 @@ Status: **not a demo candidate**. This checklist is a release-blocker record.
 
 | Required outcome | Evidence | Status |
 | --- | --- | --- |
-| Observe | CLI audit records plus live process-lifecycle and credential-inode events | Partial: no DNS/network wiring; pre-`file_open` denials are invisible |
+| Observe | CLI audit records plus live lifecycle, credential-inode, and IPv4/IPv6 TCP/UDP connect events | Partial: no live DNS response sensor; pre-`file_open` denials are invisible |
 | Profile | Deterministic trusted-run profile tests | Passes in library |
 | Generate | CLI review-only candidate from an explicit trusted observation | Partial: not derived from observed kernel events |
 | Dry-run | CLI compiled-policy verdict plus parity tests | Partial: no live kernel-policy map |
